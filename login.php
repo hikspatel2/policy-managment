@@ -224,7 +224,7 @@ $titles = ['login' => 'Login', 'forgot' => 'Forgot Password', 'reset' => 'Set a 
 <body>
     <div class="login-container">
         <div class="login-box">
-            <img src="<?php echo htmlspecialchars($branding['site_logo']); ?>" alt="Logo" class="login-logo">
+            <img src="<?php echo htmlspecialchars($branding['site_logo']); ?>" alt="Logo" class="login-logo" onerror="this.onerror=null;this.src='uploads/logos/site_logo.png';">
             <h2><?php echo htmlspecialchars($branding['site_name']); ?></h2>
 
             <?php if ($error): ?>

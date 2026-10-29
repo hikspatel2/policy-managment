@@ -1041,9 +1041,14 @@ function getBranding() {
     ];
 
     try {
+        $logo = getSetting('site_logo', $defaults['site_logo']);
+        if (empty($logo) || strpos($logo, 'channels4_profile') !== false || strpos($logo, 'blogger.googleusercontent.com') !== false) {
+            $logo = $defaults['site_logo'];
+        }
+
         $cache = [
             'site_name' => getSetting('site_name', $defaults['site_name']),
-            'site_logo' => getSetting('site_logo', $defaults['site_logo']),
+            'site_logo' => $logo,
             'currency_symbol' => getSetting('currency_symbol', $defaults['currency_symbol']),
             'site_footer' => getSetting('site_footer', $defaults['site_footer'])
         ];
