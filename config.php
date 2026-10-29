@@ -539,15 +539,15 @@ function getProfileImage($user_id) {
             $profile_image = $row['profile_image'];
             $stmt->close();
             $conn->close();
-            return $profile_image;
+            return !empty($profile_image) ? $profile_image : 'uploads/profiles/default_avatar.png';
         }
 
         $stmt->close();
         $conn->close();
-        return null;
+        return 'uploads/profiles/default_avatar.png';
     } catch (Exception $e) {
         error_log("Get profile image error: " . $e->getMessage());
-        return null;
+        return 'uploads/profiles/default_avatar.png';
     }
 }
 
@@ -1035,7 +1035,7 @@ function getBranding() {
 
     $defaults = [
         'site_name' => 'Insurance Management System',
-        'site_logo' => 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEiGXxCe0WNNedmFqSWeF761f7Kshhc-NP5ChRQKz9fr97cO8VaarvD0KlCwqHojJVBWv-RAxfOqMI5rD4H78KnARyOc6QgwL1nRRFWf5xNQ1d9F9HfAoLPPGlTyP0GwNl4n-INMEsWLQ4Y7zJtz5bOdAnc2ePH9-uCRgshlo6BsS6gJEz6fhrxL-5U5O3sX/s160/channels4_profile.jpg',
+        'site_logo' => 'uploads/logos/site_logo.png',
         'currency_symbol' => '₹',
         'site_footer' => ''
     ];

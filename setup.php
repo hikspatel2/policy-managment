@@ -978,7 +978,7 @@ function setupColumnFixups($conn)
     // seed settings — INSERT IGNORE
     $settings = [
         'site_name' => 'Insurance Management System',
-        'site_logo' => 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEiGXxCe0WNNedmFqSWeF761f7Kshhc-NP5ChRQKz9fr97cO8VaarvD0KlCwqHojJVBWv-RAxfOqMI5rD4H78KnARyOc6QgwL1nRRFWf5xNQ1d9F9HfAoLPPGlTyP0GwNl4n-INMEsWLQ4Y7zJtz5bOdAnc2ePH9-uCRgshlo6BsS6gJEz6fhrxL-5U5O3sX/s160/channels4_profile.jpg',
+        'site_logo' => 'uploads/logos/site_logo.png',
         'currency_symbol' => '₹',
         'site_footer' => '© 2025 Insurance Management System',
         'allow_user_profile_uploads' => '1',
@@ -995,6 +995,9 @@ function setupColumnFixups($conn)
         $stmt->execute();
     }
     $stmt->close();
+    // ensure legacy external blogger profile logo is replaced with clean local logo & admin avatar
+    $conn->query("UPDATE system_settings SET setting_value = 'uploads/logos/site_logo.png' WHERE setting_key = 'site_logo' AND (setting_value LIKE '%channels4_profile%' OR setting_value LIKE '%blogger.googleusercontent.com%' OR setting_value = '')");
+    $conn->query("UPDATE users SET profile_image = 'uploads/profiles/profile_admin.png' WHERE id = 1 AND (profile_image IS NULL OR profile_image = '' OR profile_image LIKE '%channels4_profile%')");
     echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> System settings verified</div>';
 }
 
@@ -1002,7 +1005,7 @@ function setupColumnFixups($conn)
 function setupDirectories()
 {
     echo '<br><div class="log-item log-info"><i class="fas fa-folder"></i> <strong>Checking upload directories...</strong></div>';
-    $dirs = ['uploads', 'uploads/profiles', 'uploads/policies', 'uploads/payouts', 'uploads/receipts', 'uploads/claims'];
+    $dirs = ['uploads', 'uploads/profiles', 'uploads/policies', 'uploads/payouts', 'uploads/receipts', 'uploads/claims', 'uploads/logos'];
     foreach ($dirs as $name) {
         $dir = __DIR__ . '/' . $name;
         if (!file_exists($dir)) {

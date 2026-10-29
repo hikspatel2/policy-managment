@@ -880,7 +880,7 @@ INSERT INTO `vehicle_categories` (`id`, `name`, `is_active`) VALUES
 -- System Settings
 INSERT INTO `system_settings` (`setting_key`, `setting_value`) VALUES
 ('site_name', 'Insurance Management System'),
-('site_logo', 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEiGXxCe0WNNedmFqSWeF761f7Kshhc-NP5ChRQKz9fr97cO8VaarvD0KlCwqHojJVBWv-RAxfOqMI5rD4H78KnARyOc6QgwL1nRRFWf5xNQ1d9F9HfAoLPPGlTyP0GwNl4n-INMEsWLQ4Y7zJtz5bOdAnc2ePH9-uCRgshlo6BsS6gJEz6fhrxL-5U5O3sX/s160/channels4_profile.jpg'),
+('site_logo', 'uploads/logos/site_logo.png'),
 ('currency_symbol', '₹'),
 ('site_footer', '© 2025 Insurance Management System'),
 ('allow_user_profile_uploads', '1'),
@@ -900,13 +900,13 @@ INSERT INTO `branches` (`id`, `branch_code`, `name`, `mobile`, `email`, `address
 (5, 'BR-05', 'Branch 5', '0421000005', 'branch5@demo.com', 'House 5, Street 5, Demo City', 'Demo City', '110005', 'State B', 0.00, 1);
 
 -- Users (Password for all accounts is: admin123)
-INSERT INTO `users` (`id`, `name`, `email`, `phone`, `password_hash`, `role`, `branch_id`, `is_active`) VALUES
-(1, 'Admin User', 'admin@demo.com', '03001000001', '$2y$10$xX3NV4KaLJcFN1DUK9h5WOPGBvzxxK7B/6WJk24kzlQxy5Qq6saPy', 'admin', 1, 1),
-(2, 'Manager 1', 'manager1@demo.com', '03001000002', '$2y$10$xX3NV4KaLJcFN1DUK9h5WOPGBvzxxK7B/6WJk24kzlQxy5Qq6saPy', 'manager', 1, 1),
-(3, 'Manager 2', 'manager2@demo.com', '03001000003', '$2y$10$xX3NV4KaLJcFN1DUK9h5WOPGBvzxxK7B/6WJk24kzlQxy5Qq6saPy', 'manager', 2, 1),
-(4, 'Agent 1', 'agent1@demo.com', '03001000004', '$2y$10$xX3NV4KaLJcFN1DUK9h5WOPGBvzxxK7B/6WJk24kzlQxy5Qq6saPy', 'agent', 1, 1),
-(5, 'Agent 2', 'agent2@demo.com', '03001000005', '$2y$10$xX3NV4KaLJcFN1DUK9h5WOPGBvzxxK7B/6WJk24kzlQxy5Qq6saPy', 'agent', 2, 1),
-(6, 'Agent 3', 'agent3@demo.com', '03001000006', '$2y$10$xX3NV4KaLJcFN1DUK9h5WOPGBvzxxK7B/6WJk24kzlQxy5Qq6saPy', 'agent', 3, 1);
+INSERT INTO `users` (`id`, `name`, `email`, `phone`, `password_hash`, `role`, `branch_id`, `is_active`, `profile_image`) VALUES
+(1, 'Admin User', 'admin@demo.com', '03001000001', '$2y$10$xX3NV4KaLJcFN1DUK9h5WOPGBvzxxK7B/6WJk24kzlQxy5Qq6saPy', 'admin', 1, 1, 'uploads/profiles/profile_admin.png'),
+(2, 'Manager 1', 'manager1@demo.com', '03001000002', '$2y$10$xX3NV4KaLJcFN1DUK9h5WOPGBvzxxK7B/6WJk24kzlQxy5Qq6saPy', 'manager', 1, 1, 'uploads/profiles/default_avatar.png'),
+(3, 'Manager 2', 'manager2@demo.com', '03001000003', '$2y$10$xX3NV4KaLJcFN1DUK9h5WOPGBvzxxK7B/6WJk24kzlQxy5Qq6saPy', 'manager', 2, 1, 'uploads/profiles/default_avatar.png'),
+(4, 'Agent 1', 'agent1@demo.com', '03001000004', '$2y$10$xX3NV4KaLJcFN1DUK9h5WOPGBvzxxK7B/6WJk24kzlQxy5Qq6saPy', 'agent', 1, 1, 'uploads/profiles/default_avatar.png'),
+(5, 'Agent 2', 'agent2@demo.com', '03001000005', '$2y$10$xX3NV4KaLJcFN1DUK9h5WOPGBvzxxK7B/6WJk24kzlQxy5Qq6saPy', 'agent', 2, 1, 'uploads/profiles/default_avatar.png'),
+(6, 'Agent 3', 'agent3@demo.com', '03001000006', '$2y$10$xX3NV4KaLJcFN1DUK9h5WOPGBvzxxK7B/6WJk24kzlQxy5Qq6saPy', 'agent', 3, 1, 'uploads/profiles/default_avatar.png');
 
 -- Agents
 INSERT INTO `agents` (`id`, `user_id`, `branch_id`, `agent_code`, `name`, `mobile`, `email`, `state`, `wallet_balance`, `outstanding_balance`) VALUES
