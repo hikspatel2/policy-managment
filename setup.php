@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Developed by Rudees Digital
  * Website: https://rudeesdigital.com
@@ -14,8 +14,8 @@ session_start();
 
 // standalone db creds — Hostinger
 define('DB_HOST', 'localhost');
-define('DB_NAME', 'u456035299_Policy');
-define('DB_USER', 'u456035299_Policy');
+define('DB_NAME', 'u456035299_policy_manage');
+define('DB_USER', 'u456035299_rudees_digital');
 define('DB_PASS', 'Rudees@2026');
 
 // raw connection helper

@@ -1,6 +1,6 @@
 -- ============================================================
 -- Insurance Management System - Full Database Schema & Seed Data
--- Database: u456035299_Policy
+-- Database: u456035299_policy_manage
 -- Generated: 2026-10-29
 -- ============================================================
 
