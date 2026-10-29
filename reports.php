@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Developed by Rudees Digital
  * Website: https://rudeesdigital.com
@@ -32,6 +32,9 @@ if (isset($_GET['action'])) {
     $to   = $_GET['to'] ?? '';
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) $from = date('Y-m-d', strtotime('-90 days'));
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $to))   $to = date('Y-m-d');
+
+    $cat = trim($_GET['category'] ?? '');
+    if (!in_array($cat, ['motor', 'health', 'life'], true)) $cat = '';
 
     try {
         $conn = getDBConnection();
@@ -68,12 +71,12 @@ if (isset($_GET['action'])) {
                         FROM agents a
                         LEFT JOIN policy_entries p
                           ON p.agent_id = a.id AND p.status != 'cancelled'
-                          AND p.entry_date BETWEEN ? AND ?
-                        WHERE a.is_active = 1";
+                          AND p.entry_date BETWEEN ? AND ?";
                 $params = [$from, $to];
                 $types = 'ss';
                 if ($agentId) { $sql .= " AND a.id = ?"; $params[] = $agentId; $types .= 'i'; }
-                $sql .= " GROUP BY a.id, a.name, a.agent_code ORDER BY comm_earned DESC";
+                if ($cat !== '') { $sql .= " AND p.insurance_category = ?"; $params[] = $cat; $types .= 's'; }
+                $sql .= " WHERE a.is_active = 1 GROUP BY a.id, a.name, a.agent_code ORDER BY comm_earned DESC";
 
                 $stmt = $conn->prepare($sql);
                 $stmt->bind_param($types, ...$params);
@@ -119,15 +122,19 @@ if (isset($_GET['action'])) {
             // report 2: renewals / expiry worklist — policies ending in range
             case 'reportRenewals':
                 $sql = "SELECT pe.id, pe.policy_number, pe.customer_name, pe.vehicle_number, pe.vehicle_type,
+                               pe.insurance_category, pe.plan_name, pe.sum_insured, pe.sum_assured,
                                pe.agent_name, pe.total_premium_amount, pe.policy_end_date, pe.status, pe.last_reminder_at, pe.reminder_count,
                                DATEDIFF(pe.policy_end_date, CURDATE()) AS days_to_expiry,
                                EXISTS(SELECT 1 FROM policy_entries r WHERE r.previous_policy_id = pe.id) AS renewed
                         FROM policy_entries pe
                         WHERE pe.status != 'cancelled'
-                          AND pe.policy_end_date BETWEEN ? AND ?
-                        ORDER BY pe.policy_end_date ASC";
+                          AND pe.policy_end_date BETWEEN ? AND ?";
+                $params = [$from, $to];
+                $types = 'ss';
+                if ($cat !== '') { $sql .= " AND pe.insurance_category = ?"; $params[] = $cat; $types .= 's'; }
+                $sql .= " ORDER BY pe.policy_end_date ASC";
                 $stmt = $conn->prepare($sql);
-                $stmt->bind_param('ss', $from, $to);
+                $stmt->bind_param($types, ...$params);
                 $stmt->execute();
                 $res = $stmt->get_result();
                 $rows = [];
@@ -144,12 +151,20 @@ if (isset($_GET['action'])) {
 
             // customer dues — we paid the insurer more than the customer has paid us (as of today, not range-bound)
             case 'reportCustomerDues':
-                $rows = $conn->query("SELECT pe.id, pe.policy_number, pe.customer_name, COALESCE(NULLIF(c.whatsapp_number, ''), c.mobile) AS phone,
-                                             pe.vehicle_number, pe.agent_name, pe.entry_date, pe.payment_out, pe.payment_in,
-                                             pe.payment_out - pe.payment_in AS due, DATEDIFF(CURDATE(), pe.entry_date) AS age_days
-                                      FROM policy_entries pe LEFT JOIN customers c ON c.id = pe.customer_id
-                                      WHERE pe.status <> 'cancelled' AND pe.payment_out > pe.payment_in
-                                      ORDER BY due DESC")->fetch_all(MYSQLI_ASSOC);
+                $sql = "SELECT pe.id, pe.policy_number, pe.customer_name, COALESCE(NULLIF(c.whatsapp_number, ''), c.mobile) AS phone,
+                               pe.insurance_category, pe.plan_name, pe.vehicle_number, pe.agent_name, pe.entry_date, pe.payment_out, pe.payment_in,
+                               pe.payment_out - pe.payment_in AS due, DATEDIFF(CURDATE(), pe.entry_date) AS age_days
+                        FROM policy_entries pe LEFT JOIN customers c ON c.id = pe.customer_id
+                        WHERE pe.status <> 'cancelled' AND pe.payment_out > pe.payment_in";
+                $params = [];
+                $types = '';
+                if ($cat !== '') { $sql .= " AND pe.insurance_category = ?"; $params[] = $cat; $types .= 's'; }
+                $sql .= " ORDER BY due DESC";
+                $stmt = $conn->prepare($sql);
+                if ($types !== '') $stmt->bind_param($types, ...$params);
+                $stmt->execute();
+                $rows = $stmt->get_result()->fetch_all(MYSQLI_ASSOC);
+                $stmt->close();
                 foreach ($rows as &$r) foreach (['payment_out', 'payment_in', 'due'] as $k) $r[$k] = (float)$r[$k];
                 unset($r);
                 $conn->close();
@@ -169,10 +184,13 @@ if (isset($_GET['action'])) {
                                COALESCE(SUM(net_premium_amount),0) AS net_premium
                         FROM policy_entries
                         WHERE status != 'cancelled'
-                          AND entry_date BETWEEN ? AND ?
-                        GROUP BY period ORDER BY period ASC";
+                          AND entry_date BETWEEN ? AND ?";
+                $params = [$from, $to];
+                $types = 'ss';
+                if ($cat !== '') { $sql .= " AND insurance_category = ?"; $params[] = $cat; $types .= 's'; }
+                $sql .= " GROUP BY period ORDER BY period ASC";
                 $stmt = $conn->prepare($sql);
-                $stmt->bind_param('ss', $from, $to);
+                $stmt->bind_param($types, ...$params);
                 $stmt->execute();
                 $res = $stmt->get_result();
                 $rows = [];
@@ -200,11 +218,13 @@ if (isset($_GET['action'])) {
                         FROM branches b
                         LEFT JOIN policy_entries p
                           ON p.branch_id = b.id AND p.status != 'cancelled'
-                          AND p.entry_date BETWEEN ? AND ?
-                        WHERE b.is_active = 1
-                        GROUP BY b.id, b.name ORDER BY b.name";
+                          AND p.entry_date BETWEEN ? AND ?";
+                $params = [$from, $to];
+                $types = 'ss';
+                if ($cat !== '') { $sql .= " AND p.insurance_category = ?"; $params[] = $cat; $types .= 's'; }
+                $sql .= " WHERE b.is_active = 1 GROUP BY b.id, b.name ORDER BY b.name";
                 $stmt = $conn->prepare($sql);
-                $stmt->bind_param('ss', $from, $to);
+                $stmt->bind_param($types, ...$params);
                 $stmt->execute();
                 $res = $stmt->get_result();
                 $rows = [];
@@ -308,12 +328,12 @@ if (isset($_GET['action'])) {
                         FROM buyers b
                         LEFT JOIN policy_entries p
                           ON p.buyer_id = b.id AND p.status != 'cancelled'
-                          AND p.entry_date BETWEEN ? AND ?
-                        WHERE b.is_active = 1";
+                          AND p.entry_date BETWEEN ? AND ?";
                 $params = [$from, $to];
                 $types = 'ss';
                 if ($buyerId) { $sql .= " AND b.id = ?"; $params[] = $buyerId; $types .= 'i'; }
-                $sql .= " GROUP BY b.id, b.company_name, b.company_code ORDER BY receivable DESC";
+                if ($cat !== '') { $sql .= " AND p.insurance_category = ?"; $params[] = $cat; $types .= 's'; }
+                $sql .= " WHERE b.is_active = 1 GROUP BY b.id, b.company_name, b.company_code ORDER BY receivable DESC";
 
                 $stmt = $conn->prepare($sql);
                 $stmt->bind_param($types, ...$params);
@@ -354,6 +374,41 @@ if (isset($_GET['action'])) {
                 }
                 $conn->close();
                 echo json_encode(['success' => true, 'data' => $out]);
+                exit();
+
+            // report 7: insurance vertical performance — Motor vs Health vs Life comparison
+            case 'reportCategoryPerformance':
+                $sql = "SELECT COALESCE(insurance_category, 'motor') AS category,
+                               COUNT(id) AS policy_count,
+                               COALESCE(SUM(total_premium_amount),0) AS premium,
+                               COALESCE(SUM(net_premium_amount),0) AS net_premium,
+                               COALESCE(SUM(buyer_commission_amount),0) AS buyer_comm,
+                               COALESCE(SUM(agent_commission_amount),0) AS agent_comm
+                        FROM policy_entries
+                        WHERE status != 'cancelled'
+                          AND entry_date BETWEEN ? AND ?
+                        GROUP BY category ORDER BY premium DESC";
+                $stmt = $conn->prepare($sql);
+                $stmt->bind_param('ss', $from, $to);
+                $stmt->execute();
+                $res = $stmt->get_result();
+                $rows = [];
+                while ($row = $res->fetch_assoc()) {
+                    $bComm = (float)$row['buyer_comm'];
+                    $aComm = (float)$row['agent_comm'];
+                    $rows[] = [
+                        'category'     => $row['category'],
+                        'policy_count' => (int)$row['policy_count'],
+                        'premium'      => (float)$row['premium'],
+                        'net_premium'  => (float)$row['net_premium'],
+                        'buyer_comm'   => $bComm,
+                        'agent_comm'   => $aComm,
+                        'spread'       => $bComm - $aComm
+                    ];
+                }
+                $stmt->close();
+                $conn->close();
+                echo json_encode(['success' => true, 'data' => $rows]);
                 exit();
 
             default:
@@ -427,11 +482,18 @@ $defTo   = date('Y-m-d');
                 <div class="hf-field"><label for="rptPicker" title="Report"><i class="fas fa-file-lines"></i></label><select id="rptPicker" class="filter-input searchable">
                     <option value="agentPayout">Agent Payout</option>
                     <option value="renewals">Renewals / Expiry</option>
+                    <option value="category">Vertical Performance</option>
                     <option value="premium">Premium Collection</option>
                     <option value="branch">Branch Performance</option>
                     <option value="pl">Expense vs Income</option>
                     <option value="buyer">Buyer Commission</option>
                     <option value="dues">Customer Dues</option>
+                </select></div>
+                <div class="hf-field" id="fgCategory"><label for="fltCategory" title="Insurance Vertical"><i class="fas fa-shield-halved"></i></label><select id="fltCategory" class="filter-input searchable">
+                    <option value="">All Verticals</option>
+                    <option value="motor">Motor</option>
+                    <option value="health">Health</option>
+                    <option value="life">Life</option>
                 </select></div>
                 <div class="hf-field hf-range" title="Date range"><label for="fltFrom"><i class="fas fa-calendar-days"></i></label><input type="date" id="fltFrom" aria-label="From" value="<?php echo $defFrom; ?>"><span class="hf-sep"><i class="fas fa-arrow-right-long"></i></span><input type="date" id="fltTo" aria-label="To" value="<?php echo $defTo; ?>"></div>
                 <div class="hf-seg" role="group" aria-label="Quick range"><button type="button" onclick="rsDateRange('fltFrom','fltTo',0,this)">Today</button><button type="button" onclick="rsDateRange('fltFrom','fltTo',6,this)">7 days</button><button type="button" onclick="rsDateRange('fltFrom','fltTo',29,this)">30 days</button></div>
@@ -527,6 +589,10 @@ $defTo   = date('Y-m-d');
                 title: 'Policy Renewals / Expiry', icon: 'fa-calendar-times',
                 action: 'reportRenewals'
             },
+            category: {
+                title: 'Insurance Vertical Performance', icon: 'fa-shield-halved',
+                action: 'reportCategoryPerformance'
+            },
             premium: {
                 title: 'Premium Collection', icon: 'fa-money-check-alt',
                 action: 'reportPremiumCollection'
@@ -608,6 +674,7 @@ $defTo   = date('Y-m-d');
             $('#fgAgent').toggle(currentReport === 'agentPayout');
             $('#fgBuyer').toggle(currentReport === 'buyer');
             $('#fgGroup').toggle(currentReport === 'premium');
+            $('#fgCategory').toggle(currentReport !== 'category' && currentReport !== 'pl');
             $('#fltFrom').closest('.hf-range').next('.hf-seg').addBack().toggle(!REPORTS[currentReport].asOfToday); // dues = today's position
             setTimeout(function(){ initAllSearchableDropdowns(); }, 50);
         }
@@ -638,6 +705,8 @@ $defTo   = date('Y-m-d');
             if (currentReport === 'agentPayout') params.agent_id = $('#fltAgent').val() || '';
             if (currentReport === 'buyer')      params.buyer_id = $('#fltBuyer').val() || '';
             if (currentReport === 'premium')    params.group = $('#fltGroup').val() || 'month';
+            var catVal = $('#fltCategory').val();
+            if (catVal && currentReport !== 'category') params.category = catVal;
 
             $.getJSON('?' + $.param(params), function(res) {
                 $('#loadingSkeleton').hide();
@@ -694,6 +763,7 @@ $defTo   = date('Y-m-d');
 
             if (type === 'agentPayout')  renderAgentPayout(data);
             if (type === 'renewals')     renderRenewals(data);
+            if (type === 'category')     renderCategory(data);
             if (type === 'premium')      renderPremium(data, res.group);
             if (type === 'branch')       renderBranch(data);
             if (type === 'buyer')        renderBuyer(data);
@@ -720,10 +790,24 @@ $defTo   = date('Y-m-d');
         // report 2: renewals / expiry
         function renderRenewals(data) {
             var cols = [
+                { data: 'insurance_category', title: 'Vertical', render: function(d){
+                    var cat = String(d || 'motor').toLowerCase();
+                    if (cat === 'health') return '<span class="chip-badge chip-emerald">Health</span>';
+                    if (cat === 'life') return '<span class="chip-badge chip-purple">Life</span>';
+                    return '<span class="chip-badge chip-blue">Motor</span>';
+                } },
                 { data: 'policy_number', title: 'Policy #', render: function(d){ return escapeHtml(d); } },
                 { data: 'customer_name', title: 'Customer', render: function(d){ return escapeHtml(d); } },
-                { data: 'vehicle_number', title: 'Vehicle', render: function(d, t, row){
-                    return escapeHtml(d) + ' <small style="color:#999">' + escapeHtml(row.vehicle_type) + '</small>'; } },
+                { data: 'vehicle_number', title: 'Vehicle / Plan', render: function(d, t, row){
+                    var cat = String(row.insurance_category || 'motor').toLowerCase();
+                    if (cat === 'health') {
+                        return escapeHtml(row.plan_name || 'Health Plan') + (row.sum_insured ? '<br><small style="color:#666">SI: ' + cur(row.sum_insured) + '</small>' : '');
+                    }
+                    if (cat === 'life') {
+                        return escapeHtml(row.plan_name || 'Life Policy') + (row.sum_assured ? '<br><small style="color:#666">SA: ' + cur(row.sum_assured) + '</small>' : '');
+                    }
+                    return escapeHtml(d || '-') + (row.vehicle_type ? ' <small style="color:#999">' + escapeHtml(row.vehicle_type) + '</small>' : '');
+                } },
                 { data: 'agent_name', title: 'Agent', render: function(d){ return d ? escapeHtml(d) : '<em style="color:#999">-</em>'; } },
                 { data: 'total_premium_amount', title: 'Premium', render: cur },
                 { data: 'policy_end_date', title: 'End Date' },
@@ -743,10 +827,34 @@ $defTo   = date('Y-m-d');
                         + '<a class="action-icon view-icon" href="policy_entries.php?id=' + parseInt(row.id) + '" title="Open policy" aria-label="Open policy"><i class="fas fa-eye"></i></a></div>'; } }
             ];
             // row coloring — expired -> danger, expiring within 30 days -> warning
-            buildTable(cols, data, 5, function(r) {
+            buildTable(cols, data, 6, function(r) {
                 var d = r.days_to_expiry;
                 return d < 0 ? 'dt-row-danger' : (d <= 30 ? 'dt-row-warning' : '');
             });
+        }
+
+        // report: insurance vertical performance
+        function renderCategory(data) {
+            var catNames = { motor: 'Motor Insurance', health: 'Health Insurance', life: 'Life Insurance' };
+            var catBadges = {
+                motor: '<span class="chip-badge chip-blue">Motor</span>',
+                health: '<span class="chip-badge chip-emerald">Health</span>',
+                life: '<span class="chip-badge chip-purple">Life</span>'
+            };
+            var cols = [
+                { data: 'category', title: 'Vertical', render: function(d){
+                    return (catBadges[d] || '') + ' ' + (catNames[d] || escapeHtml(d));
+                } },
+                { data: 'policy_count', title: 'Policies', render: fmt },
+                { data: 'premium', title: 'Total Premium', render: cur },
+                { data: 'net_premium', title: 'Net Premium', render: cur },
+                { data: 'buyer_comm', title: 'Buyer Commission', render: cur },
+                { data: 'agent_comm', title: 'Agent Commission', render: cur },
+                { data: 'spread', title: 'Commission Spread', render: function(d){
+                    return '<strong style="color:' + (d >= 0 ? '#34a853' : '#ea4335') + '">' + cur(d) + '</strong>';
+                } }
+            ];
+            buildTable(cols, data, 2);
         }
 
         // customer dues — paid to insurer minus received from customer
@@ -755,7 +863,12 @@ $defTo   = date('Y-m-d');
                 { data: 'policy_number', title: 'Policy #', render: function(d){ return escapeHtml(d); } },
                 { data: 'customer_name', title: 'Customer', render: function(d){ return escapeHtml(d); } },
                 { data: 'phone', title: 'Mobile', render: function(d){ return escapeHtml(d || '-'); } },
-                { data: 'vehicle_number', title: 'Vehicle', render: function(d){ return escapeHtml(d); } },
+                { data: 'vehicle_number', title: 'Vehicle / Plan', render: function(d, t, row){
+                    var cat = String(row.insurance_category || 'motor').toLowerCase();
+                    if (cat === 'health') return escapeHtml(row.plan_name || 'Health Plan');
+                    if (cat === 'life') return escapeHtml(row.plan_name || 'Life Policy');
+                    return escapeHtml(d || '-');
+                } },
                 { data: 'agent_name', title: 'Agent', render: function(d){ return escapeHtml(d || '-'); } },
                 { data: 'payment_out', title: 'Paid to Insurer', render: cur },
                 { data: 'payment_in', title: 'Received', render: cur },

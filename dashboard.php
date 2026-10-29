@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Developed by Rudees Digital
  * Website: https://rudeesdigital.com
@@ -151,8 +151,19 @@ if (isset($_GET['action']) && $_GET['action'] === 'getAgentStats') {
     }
     $stmt->close();
 
+    // vertical distribution for agent
+    $stmt = $conn->prepare("SELECT COALESCE(insurance_category, 'motor') as cat, COUNT(*) as cnt, COALESCE(SUM(total_premium_amount), 0) as prem FROM policy_entries WHERE agent_id = ? AND status != 'cancelled' GROUP BY cat");
+    $stmt->bind_param("i", $agentId);
+    $stmt->execute();
+    $catRes = $stmt->get_result();
+    $categoryDist = [];
+    while ($row = $catRes->fetch_assoc()) {
+        $categoryDist[] = ['category' => $row['cat'], 'count' => (int)$row['cnt'], 'premium' => (float)$row['prem']];
+    }
+    $stmt->close();
+
     // recent 5
-    $stmt = $conn->prepare("SELECT id, policy_number, customer_name, company_name, total_premium_amount, status, entry_date FROM policy_entries WHERE agent_id = ? ORDER BY id DESC LIMIT 5");
+    $stmt = $conn->prepare("SELECT id, policy_number, customer_name, company_name, total_premium_amount, status, entry_date, insurance_category, plan_name, vehicle_number FROM policy_entries WHERE agent_id = ? ORDER BY id DESC LIMIT 5");
     $stmt->bind_param("i", $agentId);
     $stmt->execute();
     $recentPolicies = [];
@@ -193,6 +204,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'getAgentStats') {
             'unreadNotifs' => (int)$unreadNotifs,
             'monthlyCommission' => $monthlyCommission,
             'policyByStatus' => $policyByStatus,
+            'categoryDistribution' => $categoryDist,
             'recentPolicies' => $recentPolicies,
             'todayPremium' => (float)$agToday['prem'],
             'todayPolicyCount' => (int)$agToday['cnt'],
@@ -282,10 +294,10 @@ function dashboardFocus($conn, $agentId = null) {
 
     // needs action: not cancelled, expiry within 30 days either side, nearest to today first
     $win = "status != 'cancelled' AND policy_end_date BETWEEN DATE_SUB(CURDATE(), INTERVAL 30 DAY) AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)$nr";
-    $attn = dxRows($conn, "SELECT id, policy_number, customer_name, vehicle_number, vehicle_type, company_name, total_premium_amount, policy_end_date, DATEDIFF(policy_end_date, CURDATE()) AS days FROM policy_entries WHERE $win$w ORDER BY ABS(DATEDIFF(policy_end_date, CURDATE())), total_premium_amount DESC LIMIT 6", $t, ...$a);
+    $attn = dxRows($conn, "SELECT id, policy_number, customer_name, vehicle_number, vehicle_type, company_name, total_premium_amount, policy_end_date, insurance_category, plan_name, DATEDIFF(policy_end_date, CURDATE()) AS days FROM policy_entries WHERE $win$w ORDER BY ABS(DATEDIFF(policy_end_date, CURDATE())), total_premium_amount DESC LIMIT 6", $t, ...$a);
     // quiet window -> show the next renewals coming up instead of an empty panel
     $later = !$attn;
-    if ($later) $attn = dxRows($conn, "SELECT id, policy_number, customer_name, vehicle_number, vehicle_type, company_name, total_premium_amount, policy_end_date, DATEDIFF(policy_end_date, CURDATE()) AS days FROM policy_entries WHERE status = 'active' AND policy_end_date > CURDATE()$nr$w ORDER BY policy_end_date, total_premium_amount DESC LIMIT 6", $t, ...$a);
+    if ($later) $attn = dxRows($conn, "SELECT id, policy_number, customer_name, vehicle_number, vehicle_type, company_name, total_premium_amount, policy_end_date, insurance_category, plan_name, DATEDIFF(policy_end_date, CURDATE()) AS days FROM policy_entries WHERE status = 'active' AND policy_end_date > CURDATE()$nr$w ORDER BY policy_end_date, total_premium_amount DESC LIMIT 6", $t, ...$a);
     foreach ($attn as &$r) { $r['id'] = (int)$r['id']; $r['days'] = (int)$r['days']; $r['total_premium_amount'] = (float)$r['total_premium_amount']; }
     unset($r);
     // customer dues: paid to the insurer, not yet received from the customer
@@ -407,9 +419,16 @@ if (isset($_GET['action']) && $_GET['action'] === 'getDashboardStats') {
     // policy by status
     $policyByStatus = ['active' => (int)$activePolicies, 'expired' => (int)$expiredPolicies, 'cancelled' => (int)$cancelledPolicies];
 
+    // vertical / category distribution
+    $categoryDist = [];
+    $catRes = $conn->query("SELECT COALESCE(insurance_category, 'motor') as cat, COUNT(*) as cnt, COALESCE(SUM(total_premium_amount), 0) as prem FROM policy_entries WHERE status != 'cancelled' GROUP BY cat");
+    while ($row = $catRes->fetch_assoc()) {
+        $categoryDist[] = ['category' => $row['cat'], 'count' => (int)$row['cnt'], 'premium' => (float)$row['prem']];
+    }
+
     // vehicle type dist
     $vehicleTypeDist = [];
-    $vtRes = $conn->query("SELECT vehicle_type, COUNT(*) as cnt FROM policy_entries GROUP BY vehicle_type");
+    $vtRes = $conn->query("SELECT vehicle_type, COUNT(*) as cnt FROM policy_entries WHERE vehicle_type IS NOT NULL AND vehicle_type != '' GROUP BY vehicle_type");
     while ($row = $vtRes->fetch_assoc()) {
         $vehicleTypeDist[] = ['type' => $row['vehicle_type'], 'count' => (int)$row['cnt']];
     }
@@ -430,7 +449,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'getDashboardStats') {
 
     // recent 5
     $recentPolicies = [];
-    $rpRes = $conn->query("SELECT id, policy_number, customer_name, company_name, total_premium_amount, status, entry_date FROM policy_entries ORDER BY id DESC LIMIT 5");
+    $rpRes = $conn->query("SELECT id, policy_number, customer_name, company_name, total_premium_amount, status, entry_date, insurance_category, plan_name, vehicle_number FROM policy_entries ORDER BY id DESC LIMIT 5");
     while ($row = $rpRes->fetch_assoc()) {
         $recentPolicies[] = $row;
     }
@@ -494,6 +513,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'getDashboardStats') {
             'unreadNotifications' => (int)$unreadNotifs,
             'monthlyPremium' => $monthlyPremium,
             'policyByStatus' => $policyByStatus,
+            'categoryDistribution' => $categoryDist,
             'vehicleTypeDistribution' => $vehicleTypeDist,
             'topAgents' => $topAgents,
             'topBuyers' => $topBuyers,
@@ -682,8 +702,8 @@ $branding = getBranding();
 
                 <?php echo $dxHtml; ?>
 
-                <!-- Row 3: Monthly Premium + Policy Status + Vehicle Type -->
-                <div class="dashboard-grid-3">
+                <!-- Row 3: Monthly Premium & Policy Status -->
+                <div class="dashboard-grid-2">
                     <div class="chart-card">
                         <h3><i class="fas fa-chart-area"></i> Monthly Premium & Commission</h3>
                         <div class="chart-container">
@@ -694,6 +714,16 @@ $branding = getBranding();
                         <h3><i class="fas fa-chart-pie"></i> Policy Status</h3>
                         <div class="chart-container">
                             <canvas id="chartPolicyStatus"></canvas>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Row 3B: Insurance Verticals & Vehicle Type -->
+                <div class="dashboard-grid-2">
+                    <div class="chart-card">
+                        <h3><i class="fas fa-shield-halved"></i> Insurance Verticals (Motor · Health · Life)</h3>
+                        <div class="chart-container">
+                            <canvas id="chartCategoryDist"></canvas>
                         </div>
                     </div>
                     <div class="chart-card">
@@ -742,7 +772,7 @@ $branding = getBranding();
                 <div class="data-section">
                     <div class="section-header"><h2><i class="fas fa-clock"></i> Recent Policies</h2></div>
                     <table class="report-top-table">
-                        <thead><tr><th>Date</th><th>Policy #</th><th>Customer</th><th>Premium</th><th>Status</th></tr></thead>
+                        <thead><tr><th>Date</th><th>Vertical</th><th>Policy #</th><th>Customer</th><th>Premium</th><th>Status</th></tr></thead>
                         <tbody id="tblRecentPolicies"></tbody>
                     </table>
                 </div>
@@ -781,11 +811,17 @@ $branding = getBranding();
                 <?php echo $dxHtml; ?>
 
                 <!-- Row 3: Charts -->
-                <div class="dashboard-grid-2">
+                <div class="dashboard-grid-3">
                     <div class="chart-card">
                         <h3><i class="fas fa-chart-line"></i> My Monthly Commission</h3>
                         <div class="chart-container">
                             <canvas id="chartAgentCommission"></canvas>
+                        </div>
+                    </div>
+                    <div class="chart-card">
+                        <h3><i class="fas fa-shield-halved"></i> My Insurance Verticals</h3>
+                        <div class="chart-container">
+                            <canvas id="chartAgentCategory"></canvas>
                         </div>
                     </div>
                     <div class="chart-card">
@@ -800,7 +836,7 @@ $branding = getBranding();
                 <div class="data-section" style="margin-bottom:30px">
                     <div class="section-header"><h2><i class="fas fa-clock"></i> Recent Policies</h2></div>
                     <table class="report-top-table">
-                        <thead><tr><th>Date</th><th>Policy #</th><th>Customer</th><th>Company</th><th>Premium</th><th>Status</th></tr></thead>
+                        <thead><tr><th>Date</th><th>Vertical</th><th>Policy #</th><th>Customer</th><th>Company</th><th>Premium</th><th>Status</th></tr></thead>
                         <tbody id="tblAgentRecent"></tbody>
                     </table>
                 </div>
@@ -911,8 +947,17 @@ $branding = getBranding();
         $('#dxAttn').html(head + rows.map(function(r) {
             var is = dxIssue(r.days), left = Math.max(0, r.days), tone = left > 14 ? 'ok' : left > 3 ? 'warn' : 'bad',
                 txt = left > 60 ? 'Renews ' + dShort(r.policy_end_date) : is[2];
+            var subInfo = '';
+            var ccat = String(r.insurance_category || 'motor').toLowerCase();
+            if (ccat === 'health') {
+                subInfo = (r.plan_name || 'Health Plan') + ' · Health';
+            } else if (ccat === 'life') {
+                subInfo = (r.plan_name || 'Life Policy') + ' · Life';
+            } else {
+                subInfo = (r.vehicle_type || '') + ' ' + (r.vehicle_number || '');
+            }
             return '<div class="dx-row">'
-                + '<div class="dx-case"><b>' + rsEsc(r.customer_name) + '</b><small>' + rsEsc(r.policy_number + ' · ' + (r.vehicle_type || '') + ' ' + (r.vehicle_number || '')) + '</small></div>'
+                + '<div class="dx-case"><b>' + rsEsc(r.customer_name) + '</b><small>' + rsEsc(r.policy_number + ' · ' + subInfo) + '</small></div>'
                 + '<div class="dx-issue dx-c-' + is[0] + '">' + rsEsc(txt) + '</div>'
                 + '<div class="dx-buyer">' + rsEsc(r.company_name) + '</div>'
                 + '<div class="dx-odds" title="' + left + ' days left"><span>' + (left === 1 ? '1 day' : left + ' days') + '</span><i class="dx-c-' + tone + '"><em style="width:' + Math.round(Math.min(left, 30) / 30 * 100) + '%"></em></i></div>'
@@ -1025,6 +1070,9 @@ $branding = getBranding();
 
                 // policy status doughnut
                 renderPolicyStatusChart(d.policyByStatus);
+
+                // insurance verticals doughnut
+                renderCategoryDistChart(d.categoryDistribution, 'chartCategoryDist');
 
                 // vehicle type pie
                 renderVehicleTypeChart(d.vehicleTypeDistribution);
@@ -1232,13 +1280,21 @@ $branding = getBranding();
     function renderRecentPolicies(data, target, showCompany) {
         var html = '';
         if (!data || !data.length) {
-            var cols = showCompany ? 6 : 5;
+            var cols = showCompany ? 7 : 6;
             html = '<tr><td colspan="' + cols + '" style="text-align:center;color:var(--text-muted)">No recent policies</td></tr>';
         } else {
             data.forEach(function(r) {
+                var cat = String(r.insurance_category || 'motor').toLowerCase();
+                var catBadge = '<span class="chip-badge chip-blue">Motor</span>';
+                if (cat === 'health') catBadge = '<span class="chip-badge chip-emerald">Health</span>';
+                else if (cat === 'life') catBadge = '<span class="chip-badge chip-purple">Life</span>';
+
+                var planVeh = (cat === 'health' || cat === 'life') ? (r.plan_name || (cat === 'health' ? 'Health Plan' : 'Life Plan')) : (r.vehicle_number || '-');
+
                 html += '<tr>';
                 html += '<td>' + fmtDate(r.entry_date) + '</td>';
-                html += '<td><span class="badge-code">' + escHtml(r.policy_number || '-') + '</span></td>';
+                html += '<td>' + catBadge + '</td>';
+                html += '<td><span class="badge-code">' + escHtml(r.policy_number || '-') + '</span><br><small style="color:var(--text-muted)">' + escHtml(planVeh) + '</small></td>';
                 html += '<td>' + escHtml(r.customer_name || '-') + '</td>';
                 if (showCompany) html += '<td>' + escHtml(r.company_name || '-') + '</td>';
                 html += '<td><span class="wallet-amount">' + cur(r.total_premium_amount) + '</span></td>';
@@ -1247,6 +1303,41 @@ $branding = getBranding();
             });
         }
         $(target).html(html);
+    }
+
+    function renderCategoryDistChart(data, canvasId) {
+        var id = canvasId || 'chartCategoryDist';
+        var total = (data || []).reduce(function(s, r) { return s + r.count; }, 0);
+        var catNames = { motor: 'Motor', health: 'Health', life: 'Life' };
+        var catColors = { motor: '#0074D9', health: '#10b981', life: '#8b5cf6' };
+        mkChart(id, !!(data && data.length), {
+            type: 'doughnut',
+            data: {
+                labels: (data || []).map(function(r) { return catNames[r.category] || r.category; }),
+                datasets: [{
+                    data: (data || []).map(function(r) { return r.count; }),
+                    backgroundColor: (data || []).map(function(r) { return catColors[r.category] || '#6c757d'; }),
+                    borderWidth: 2,
+                    borderColor: 'var(--bg-card)'
+                }]
+            },
+            options: {
+                responsive: true,
+                cutout: '55%',
+                plugins: {
+                    legend: { position: 'bottom', labels: { padding: 12, usePointStyle: true, pointStyle: 'circle' } },
+                    tooltip: {
+                        callbacks: {
+                            label: function(ctx) {
+                                var item = data[ctx.dataIndex] || {};
+                                var pct = total > 0 ? ((ctx.parsed / total) * 100).toFixed(1) : 0;
+                                return ctx.label + ': ' + ctx.parsed + ' policies (' + pct + '%) · ' + cur(item.premium || 0);
+                            }
+                        }
+                    }
+                }
+            }
+        });
     }
 
     // escape html
@@ -1313,6 +1404,9 @@ $branding = getBranding();
 
                 // monthly commission line chart
                 renderAgentCommissionChart(d.monthlyCommission);
+
+                // insurance verticals doughnut
+                renderCategoryDistChart(d.categoryDistribution, 'chartAgentCategory');
 
                 // policy status doughnut
                 renderAgentStatusChart(d.policyByStatus);
@@ -1387,22 +1481,7 @@ $branding = getBranding();
     }
 
     function renderAgentRecentPolicies(data) {
-        var html = '';
-        if (!data || !data.length) {
-            html = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted)">No recent policies</td></tr>';
-        } else {
-            data.forEach(function(r) {
-                html += '<tr>';
-                html += '<td>' + fmtDate(r.entry_date) + '</td>';
-                html += '<td><span class="badge-code">' + escHtml(r.policy_number || '-') + '</span></td>';
-                html += '<td>' + escHtml(r.customer_name || '-') + '</td>';
-                html += '<td>' + escHtml(r.company_name || '-') + '</td>';
-                html += '<td><span class="wallet-amount">' + cur(r.total_premium_amount) + '</span></td>';
-                html += '<td>' + statusBadge(r.status) + '</td>';
-                html += '</tr>';
-            });
-        }
-        $('#tblAgentRecent').html(html);
+        renderRecentPolicies(data, '#tblAgentRecent', true);
     }
 
     // escape html (agent scope)
