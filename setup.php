@@ -19,7 +19,8 @@ define('DB_USER', 'u456035299_rudees_digital');
 define('DB_PASS', 'Rudees@2026');
 
 // raw connection helper
-function setupConn() {
+function setupConn()
+{
     if (!class_exists('mysqli')) {
         die('<div class="log-item log-error"><i class="fas fa-times-circle"></i> PHP MySQLi extension is not enabled in your PHP configuration.</div>');
     }
@@ -36,15 +37,21 @@ function setupConn() {
 }
 
 // is this a fresh install? (no users table, or zero users)
-function isFreshInstall() {
-    if (!class_exists('mysqli')) return true;
+function isFreshInstall()
+{
+    if (!class_exists('mysqli'))
+        return true;
     try {
         $conn = @new mysqli(DB_HOST, DB_USER, DB_PASS, DB_NAME);
-        if ($conn->connect_error) return true;
+        if ($conn->connect_error)
+            return true;
         $t = $conn->query("SHOW TABLES LIKE 'users'");
-        if (!$t || $t->num_rows == 0) { $conn->close(); return true; }
+        if (!$t || $t->num_rows == 0) {
+            $conn->close();
+            return true;
+        }
         $c = $conn->query("SELECT COUNT(*) AS n FROM users");
-        $n = ($c && ($row = $c->fetch_assoc())) ? (int)$row['n'] : 0;
+        $n = ($c && ($row = $c->fetch_assoc())) ? (int) $row['n'] : 0;
         $conn->close();
         return $n === 0;
     } catch (Throwable $e) {
@@ -76,7 +83,8 @@ if (!$fresh && !$isAdmin && !$force) {
 $action = $_GET['action'] ?? '';
 
 // helper: add column if not exists
-function addColumnIfNotExists($conn, $table, $column, $definition) {
+function addColumnIfNotExists($conn, $table, $column, $definition)
+{
     $check = $conn->query("SHOW COLUMNS FROM `$table` LIKE '$column'");
     if ($check && $check->num_rows == 0) {
         if ($conn->query("ALTER TABLE `$table` ADD COLUMN `$column` $definition")) {
@@ -90,7 +98,8 @@ function addColumnIfNotExists($conn, $table, $column, $definition) {
 }
 
 // helper: add index if not exists
-function addIndexIfNotExists($conn, $table, $indexName, $columns) {
+function addIndexIfNotExists($conn, $table, $indexName, $columns)
+{
     $check = $conn->query("SHOW INDEX FROM `$table` WHERE Key_name = '$indexName'");
     if ($check && $check->num_rows == 0) {
         if ($conn->query("ALTER TABLE `$table` ADD INDEX `$indexName` ($columns)")) {
@@ -104,7 +113,8 @@ function addIndexIfNotExists($conn, $table, $indexName, $columns) {
 }
 
 // helper: run a CREATE TABLE IF NOT EXISTS, log result
-function createTable($conn, $name, $sql) {
+function createTable($conn, $name, $sql)
+{
     if ($conn->query($sql)) {
         echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Table "' . $name . '" ready</div>';
     } else {
@@ -113,7 +123,8 @@ function createTable($conn, $name, $sql) {
 }
 
 // schema definitions — all CREATE TABLE IF NOT EXISTS (idempotent)
-function setupSchema($conn) {
+function setupSchema($conn)
+{
     echo '<br><div class="log-item log-info"><i class="fas fa-cogs"></i> <strong>Creating / verifying tables...</strong></div>';
 
     createTable($conn, 'branches', "CREATE TABLE IF NOT EXISTS branches (
@@ -752,7 +763,8 @@ function setupSchema($conn) {
 }
 
 // additive column/index/seed-setting fixups for existing installs
-function setupColumnFixups($conn) {
+function setupColumnFixups($conn)
+{
     echo '<br><div class="log-item log-info"><i class="fas fa-wrench"></i> <strong>Verifying columns on existing tables...</strong></div>';
 
     addColumnIfNotExists($conn, 'buyers', 'company_code', "VARCHAR(30) NOT NULL DEFAULT '' AFTER company_name");
@@ -913,7 +925,8 @@ function setupColumnFixups($conn) {
         ['claims', 'life_claim_type', "ENUM('death','maturity','surrender','critical_illness','disability') NULL AFTER diagnosis"],
         ['claims', 'date_of_event', "DATE NULL AFTER life_claim_type"],
     ];
-    foreach ($cols as [$t, $c, $def]) addColumnIfNotExists($conn, $t, $c, $def);
+    foreach ($cols as [$t, $c, $def])
+        addColumnIfNotExists($conn, $t, $c, $def);
 
     // Make vehicle fields nullable for non-motor policies
     @$conn->query("ALTER TABLE policy_entries MODIFY COLUMN vehicle_id BIGINT NULL");
@@ -986,7 +999,8 @@ function setupColumnFixups($conn) {
 }
 
 // create upload directories
-function setupDirectories() {
+function setupDirectories()
+{
     echo '<br><div class="log-item log-info"><i class="fas fa-folder"></i> <strong>Checking upload directories...</strong></div>';
     $dirs = ['uploads', 'uploads/profiles', 'uploads/policies', 'uploads/payouts', 'uploads/receipts', 'uploads/claims'];
     foreach ($dirs as $name) {
@@ -1013,8 +1027,9 @@ function setupDirectories() {
 }
 
 // drop all tables (reverse-FK order)
-function dropAllTables($conn) {
-    $dropTables = ['claim_documents','claims','policy_endorsements','policy_trash','password_resets','todos','payout_chart_uploads','point_transactions','referrals','notifications','other_income','buyer_transactions','agent_transactions','agent_payout_charts','buyer_payout_charts','bank_transactions','expenses','expense_categories','policy_documents','policy_entries','vehicles','bank_accounts','customers','buyers','agents','login_attempts','activity_logs','system_settings','users','branches'];
+function dropAllTables($conn)
+{
+    $dropTables = ['claim_documents', 'claims', 'policy_endorsements', 'policy_trash', 'password_resets', 'todos', 'payout_chart_uploads', 'point_transactions', 'referrals', 'notifications', 'other_income', 'buyer_transactions', 'agent_transactions', 'agent_payout_charts', 'buyer_payout_charts', 'bank_transactions', 'expenses', 'expense_categories', 'policy_documents', 'policy_entries', 'vehicles', 'bank_accounts', 'customers', 'buyers', 'agents', 'login_attempts', 'activity_logs', 'system_settings', 'users', 'branches'];
     foreach ($dropTables as $t) {
         $conn->query("DROP TABLE IF EXISTS `$t`");
     }
@@ -1022,7 +1037,8 @@ function dropAllTables($conn) {
 }
 
 // full demo seed (used by reset only)
-function seedDemoData($conn) {
+function seedDemoData($conn)
+{
     echo '<br><div class="log-item log-info"><i class="fas fa-seedling"></i> <strong>Seeding demo data...</strong></div>';
 
     $conn->query("INSERT INTO branches (name, mobile, email, address, state) VALUES
@@ -1350,42 +1366,67 @@ function seedDemoData($conn) {
     seedDemoExtras($conn);
 
     // recompute balances from ledgers — single source of truth
-    foreach ([1, 2, 3] as $aid) { recalcLedger($conn, 'agent_transactions', 'agents', 'agent_id', $aid); }
-    foreach ([1, 2, 3, 4, 5] as $bid) { recalcLedger($conn, 'buyer_transactions', 'buyers', 'buyer_id', $bid); }
-    foreach ([1, 2, 3, 4] as $bk) { recalcBankLedger($conn, $bk); }
+    foreach ([1, 2, 3] as $aid) {
+        recalcLedger($conn, 'agent_transactions', 'agents', 'agent_id', $aid);
+    }
+    foreach ([1, 2, 3, 4, 5] as $bid) {
+        recalcLedger($conn, 'buyer_transactions', 'buyers', 'buyer_id', $bid);
+    }
+    foreach ([1, 2, 3, 4] as $bk) {
+        recalcBankLedger($conn, $bk);
+    }
     echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Recomputed agent / buyer / bank balances from ledgers</div>';
 }
 
 // customer dues, endorsements, claims, reminders and the expense approval queue — so every screen has something to show
-function seedDemoExtras($conn) {
+function seedDemoExtras($conn)
+{
     $one = fn($sql) => $conn->query($sql)->fetch_all(MYSQLI_ASSOC);
     $leg = $conn->prepare("INSERT INTO bank_transactions (bank_account_id, transaction_date, description, transaction_type, amount, running_balance, policy_entry_id, category, created_by) VALUES (?, ?, ?, ?, ?, 0, ?, ?, 1)");
     $setPay = $conn->prepare("UPDATE policy_entries SET payment_out = ?, payment_out_bank_account_id = 1, payment_in = ?, payment_in_bank_account_id = ?, payment_mode = 'Bank Transfer' WHERE id = ?");
     // dues: we paid the insurer, the customer paid part or nothing
     foreach ($one("SELECT id, policy_number, customer_name, net_premium_amount, entry_date FROM policy_entries WHERE status = 'active' ORDER BY entry_date DESC, id DESC LIMIT 5") as $i => $p) {
-        $out = (float)$p['net_premium_amount']; $in = round($out * [0, 0.5, 0.3, 0, 0.6][$i] / 100) * 100; $inBank = $in > 0 ? 2 : null; $pid = (int)$p['id'];
-        $setPay->bind_param('ddii', $out, $in, $inBank, $pid); $setPay->execute();
-        $d = "Payment Out - {$p['policy_number']} ({$p['customer_name']})"; $bk = 1; $t = 'debit'; $cat = 'policy_payment_out';
-        $leg->bind_param('isssdis', $bk, $p['entry_date'], $d, $t, $out, $pid, $cat); $leg->execute();
+        $out = (float) $p['net_premium_amount'];
+        $in = round($out * [0, 0.5, 0.3, 0, 0.6][$i] / 100) * 100;
+        $inBank = $in > 0 ? 2 : null;
+        $pid = (int) $p['id'];
+        $setPay->bind_param('ddii', $out, $in, $inBank, $pid);
+        $setPay->execute();
+        $d = "Payment Out - {$p['policy_number']} ({$p['customer_name']})";
+        $bk = 1;
+        $t = 'debit';
+        $cat = 'policy_payment_out';
+        $leg->bind_param('isssdis', $bk, $p['entry_date'], $d, $t, $out, $pid, $cat);
+        $leg->execute();
         if ($in > 0) {
-            $d = "Payment In - {$p['policy_number']} ({$p['customer_name']})"; $bk = 2; $t = 'credit'; $cat = 'policy_payment_in';
-            $leg->bind_param('isssdis', $bk, $p['entry_date'], $d, $t, $in, $pid, $cat); $leg->execute();
+            $d = "Payment In - {$p['policy_number']} ({$p['customer_name']})";
+            $bk = 2;
+            $t = 'credit';
+            $cat = 'policy_payment_in';
+            $leg->bind_param('isssdis', $bk, $p['entry_date'], $d, $t, $in, $pid, $cat);
+            $leg->execute();
         }
     }
     // endorsements; the hypothecation fee went to other income + bank 3
     $act = $one("SELECT id, policy_number, branch_id, policy_start_date FROM policy_entries WHERE status = 'active' AND policy_start_date <= CURDATE() - INTERVAL 20 DAY ORDER BY id LIMIT 3");
     $end = $conn->prepare("INSERT INTO policy_endorsements (policy_entry_id, endorsement_number, endorsement_type, endorsement_date, description, premium_change, fee_amount, other_income_id, created_by) VALUES (?, ?, ?, DATE_SUB(CURDATE(), INTERVAL ? DAY), ?, ?, ?, ?, 1)");
     foreach ([['hypothecation', 'Loan with Demo Bank noted on the policy', 0, 500], ['addon_cover', 'Zero depreciation add-on added', 1250, 0], ['correction', 'Engine number corrected as per RC', 0, 0]] as $k => [$type, $desc, $chg, $fee]) {
-        if (!isset($act[$k])) break;
-        $p = $act[$k]; $pid = (int)$p['id']; $no = sprintf('END-%s-%03d', date('Y'), $k + 1); $ago = 10 + $k * 4; $oi = null;
+        if (!isset($act[$k]))
+            break;
+        $p = $act[$k];
+        $pid = (int) $p['id'];
+        $no = sprintf('END-%s-%03d', date('Y'), $k + 1);
+        $ago = 10 + $k * 4;
+        $oi = null;
         if ($fee > 0) {
             $src = "Endorsement fee - {$p['policy_number']}";
-            $conn->query("INSERT INTO other_income (branch_id, income_date, source, amount, payment_mode, bank_account_id, reference_number, created_by) VALUES (" . (int)$p['branch_id'] . ", DATE_SUB(CURDATE(), INTERVAL $ago DAY), '" . $conn->real_escape_string($src) . "', $fee, 'Bank Transfer', 3, '$no', 1)");
+            $conn->query("INSERT INTO other_income (branch_id, income_date, source, amount, payment_mode, bank_account_id, reference_number, created_by) VALUES (" . (int) $p['branch_id'] . ", DATE_SUB(CURDATE(), INTERVAL $ago DAY), '" . $conn->real_escape_string($src) . "', $fee, 'Bank Transfer', 3, '$no', 1)");
             $oi = $conn->insert_id;
             $conn->query("INSERT INTO bank_transactions (bank_account_id, other_income_id, transaction_date, description, reference_number, transaction_type, amount, running_balance, category, created_by)
                           VALUES (3, $oi, DATE_SUB(CURDATE(), INTERVAL $ago DAY), '" . $conn->real_escape_string("Other Income: $src [OI#$oi]") . "', '$no', 'credit', $fee, 0, 'other_income', 1)");
         }
-        $end->bind_param('issisddi', $pid, $no, $type, $ago, $desc, $chg, $fee, $oi); $end->execute();
+        $end->bind_param('issisddi', $pid, $no, $type, $ago, $desc, $chg, $fee, $oi);
+        $end->execute();
     }
     // claims in every state of the pipeline
     $pols = $one("SELECT id, policy_start_date, policy_end_date, idv, total_premium_amount FROM policy_entries WHERE status != 'cancelled' AND policy_start_date <= CURDATE() - INTERVAL 40 DAY AND policy_end_date >= CURDATE() ORDER BY id DESC LIMIT 6");
@@ -1400,12 +1441,17 @@ function seedDemoExtras($conn) {
         ['theft', 35, 'rejected', 90000, null, null, null, 'FIR filed after the allowed period'],
     ];
     foreach ($demo as $k => [$type, $ago, $st, $claimed, $appr, $paid, $mode, $why]) {
-        if (!isset($pols[$k])) break;
-        $pid = (int)$pols[$k]['id']; $no = sprintf('CLM-%s-%04d', date('Y', strtotime("-$ago days")), $k + 1); $ins = sprintf('INS/CL/%05d', 3100 + $k * 7);
-        $intim = max(0, $ago - 1); $place = ['Demo City Ring Road', 'Main Market', 'Highway Toll Plaza', 'Station Road', 'River Bridge', 'Mall Parking'][$k];
+        if (!isset($pols[$k]))
+            break;
+        $pid = (int) $pols[$k]['id'];
+        $no = sprintf('CLM-%s-%04d', date('Y', strtotime("-$ago days")), $k + 1);
+        $ins = sprintf('INS/CL/%05d', 3100 + $k * 7);
+        $intim = max(0, $ago - 1);
+        $place = ['Demo City Ring Road', 'Main Market', 'Highway Toll Plaza', 'Station Road', 'River Bridge', 'Mall Parking'][$k];
         $desc = ['Rear bumper damaged in a parking hit', 'Front-end collision at a junction', 'Third-party two-wheeler damaged while reversing', 'Windshield cracked by a stone', 'Water entered the engine during heavy rain', 'Vehicle stolen from parking'][$k];
         $fir = in_array($type, ['theft', 'third_party'], true) ? sprintf('FIR-%04d/%s', 210 + $k, date('Y')) : null;
-        $sv = $st === 'intimated' ? null : 'Surveyor ' . ($k + 1); $svm = $sv ? sprintf('0300%07d', 3000000 + $k) : null;
+        $sv = $st === 'intimated' ? null : 'Surveyor ' . ($k + 1);
+        $svm = $sv ? sprintf('0300%07d', 3000000 + $k) : null;
         $svd = $sv ? date('Y-m-d', strtotime('-' . max(0, $ago - 3) . ' days')) : null;
         $garage = $mode === 'cashless' ? 'Demo Motors Workshop' : null;
         $setDate = $paid ? date('Y-m-d', strtotime('-' . max(0, $ago - 12) . ' days')) : null;
@@ -1423,7 +1469,8 @@ function seedDemoExtras($conn) {
 
 // a year of business so the dashboard has real shape: last year's book coming up for renewal
 // (some already lapsed), 8 months of growing new business, monthly running costs, a live activity trail
-function seedDemoHistory($conn) {
+function seedDemoHistory($conn)
+{
     mt_srand(2026); // same demo every reset
     $types = ['Car' => [9000, 18000, 15, 10, 'Petrol'], 'Two Wheeler' => [3500, 7500, 12, 8, 'Petrol'], 'Commercial' => [18000, 32000, 17, 12, 'Diesel']];
     $tNames = array_keys($types);
@@ -1441,26 +1488,71 @@ function seedDemoHistory($conn) {
         $n++;
         $type = $tNames[mt_rand(0, 2)];
         [$lo, $hi, $bRate, $aRate, $fuel] = $types[$type];
-        $name = "Customer $n"; $mob = sprintf('0300200%04d', $n); $mail = "customer$n@demo.com";
-        $state = ['State A', 'State B', 'State C'][$n % 3]; $ref = sprintf('REF-%04d', $n);
-        $cust->bind_param('sssss', $name, $mob, $mail, $state, $ref); $cust->execute(); $cid = $cust->insert_id;
-        $vno = sprintf('VH-%04d', $n); $make = 'Make ' . chr(65 + $n % 5); $model = "Model $n"; $yr = mt_rand(2018, 2025);
-        $veh->bind_param('ssssisi', $vno, $type, $make, $model, $yr, $fuel, $cid); $veh->execute(); $vid = $veh->insert_id;
+        $name = "Customer $n";
+        $mob = sprintf('0300200%04d', $n);
+        $mail = "customer$n@demo.com";
+        $state = ['State A', 'State B', 'State C'][$n % 3];
+        $ref = sprintf('REF-%04d', $n);
+        $cust->bind_param('sssss', $name, $mob, $mail, $state, $ref);
+        $cust->execute();
+        $cid = $cust->insert_id;
+        $vno = sprintf('VH-%04d', $n);
+        $make = 'Make ' . chr(65 + $n % 5);
+        $model = "Model $n";
+        $yr = mt_rand(2018, 2025);
+        $veh->bind_param('ssssisi', $vno, $type, $make, $model, $yr, $fuel, $cid);
+        $veh->execute();
+        $vid = $veh->insert_id;
 
         $total = round(mt_rand($lo, $hi) / 500) * 500;
-        $tp = round($total * 0.33 / 10) * 10; $od = round($total * 0.53 / 10) * 10; $net = $tp + $od;
-        $bAmt = round($total * $bRate / 100, 2); $aAmt = round($total * $aRate / 100, 2);
-        $branch = 1 + $n % 5; $aid = 1 + $n % 3; $aName = "Agent $aid"; $bid = 1 + mt_rand(0, 4);
-        $comp = "Company $bid"; $code = "CMP$bid";
+        $tp = round($total * 0.33 / 10) * 10;
+        $od = round($total * 0.53 / 10) * 10;
+        $net = $tp + $od;
+        $bAmt = round($total * $bRate / 100, 2);
+        $aAmt = round($total * $aRate / 100, 2);
+        $branch = 1 + $n % 5;
+        $aid = 1 + $n % 3;
+        $aName = "Agent $aid";
+        $bid = 1 + mt_rand(0, 4);
+        $comp = "Company $bid";
+        $code = "CMP$bid";
         $polNo = 'POL-' . substr($start, 0, 4) . '-' . sprintf('%03d', $n);
         $end = date('Y-m-d', strtotime("$start +1 year"));
-        $pol->bind_param('siissisisisssddddddddsss', $start, $branch, $vid, $vno, $type, $cid, $name, $aid, $aName, $bid, $comp, $code, $polNo,
-            $total, $tp, $od, $net, $bRate, $bAmt, $aRate, $aAmt, $start, $end, $status);
+        $pol->bind_param(
+            'siissisisisssddddddddsss',
+            $start,
+            $branch,
+            $vid,
+            $vno,
+            $type,
+            $cid,
+            $name,
+            $aid,
+            $aName,
+            $bid,
+            $comp,
+            $code,
+            $polNo,
+            $total,
+            $tp,
+            $od,
+            $net,
+            $bRate,
+            $bAmt,
+            $aRate,
+            $aAmt,
+            $start,
+            $end,
+            $status
+        );
         $pol->execute();
-        if ($status === 'cancelled') return;
+        if ($status === 'cancelled')
+            return;
         $desc = "Commission for $polNo";
-        $agTx->bind_param('issds', $aid, $start, $desc, $aAmt, $polNo); $agTx->execute();
-        $byTx->bind_param('issds', $bid, $start, $desc, $bAmt, $polNo); $byTx->execute();
+        $agTx->bind_param('issds', $aid, $start, $desc, $aAmt, $polNo);
+        $agTx->execute();
+        $byTx->bind_param('issds', $bid, $start, $desc, $bAmt, $polNo);
+        $byTx->execute();
     };
 
     // last year's book: end dates from 4 weeks overdue to 2 months ahead
@@ -1471,13 +1563,14 @@ function seedDemoHistory($conn) {
     // new business, growing month on month (current month only up to today)
     foreach ([7 => 4, 6 => 5, 5 => 5, 4 => 6, 3 => 7, 2 => 7, 1 => 8, 0 => 6] as $ago => $cnt) {
         $first = strtotime(date('Y-m-01') . " -$ago months");
-        $last = $ago ? (int)date('t', $first) : (int)date('j');
+        $last = $ago ? (int) date('t', $first) : (int) date('j');
         for ($i = 0; $i < $cnt; $i++) {
             $day = 1 + ($i * 37 + $ago * 11) % $last;
             $add(date('Y-m-', $first) . sprintf('%02d', $day), $i === 3 && $ago % 3 === 1 ? 'cancelled' : 'active');
         }
     }
-    foreach ([$cust, $veh, $pol, $agTx, $byTx] as $st) $st->close();
+    foreach ([$cust, $veh, $pol, $agTx, $byTx] as $st)
+        $st->close();
 
     // monthly running costs + side income, cash so no bank legs are needed
     $exp = $conn->prepare("INSERT INTO expenses (expense_category_id, branch_id, expense_date, description, amount, payment_mode, bank_account_id, reference_number, created_by) VALUES (?, 1, ?, ?, ?, 'Cash', NULL, ?, 1)");
@@ -1485,13 +1578,23 @@ function seedDemoHistory($conn) {
     for ($ago = 7, $k = 0; $ago >= 1; $ago--) {
         $m = date('Y-m-', strtotime(date('Y-m-01') . " -$ago months"));
         foreach ([[1, '05', 'Staff salary', 4000], [2, '03', 'Office rent', 2500], [3, '12', 'Electricity bill', 600 + $ago * 40], [6, '18', 'Field visits', 400 + $ago * 60]] as [$cat, $d, $what, $amt]) {
-            $k++; $date = $m . $d; $ref = sprintf('EXP-H%03d', $k); $amt = (float)$amt;
-            $exp->bind_param('issds', $cat, $date, $what, $amt, $ref); $exp->execute();
+            $k++;
+            $date = $m . $d;
+            $ref = sprintf('EXP-H%03d', $k);
+            $amt = (float) $amt;
+            $exp->bind_param('issds', $cat, $date, $what, $amt, $ref);
+            $exp->execute();
         }
-        $date = $m . '20'; $src = $ago % 2 ? 'Processing fee' : 'Endorsement fee'; $amt = 1500.0 + $ago * 150; $ref = sprintf('INC-H%03d', $ago); $br = 1 + $ago % 3;
-        $inc->bind_param('issds', $br, $date, $src, $amt, $ref); $inc->execute();
+        $date = $m . '20';
+        $src = $ago % 2 ? 'Processing fee' : 'Endorsement fee';
+        $amt = 1500.0 + $ago * 150;
+        $ref = sprintf('INC-H%03d', $ago);
+        $br = 1 + $ago % 3;
+        $inc->bind_param('issds', $br, $date, $src, $amt, $ref);
+        $inc->execute();
     }
-    $exp->close(); $inc->close();
+    $exp->close();
+    $inc->close();
 
     // recent activity trail (logins are left out of the dashboard feed)
     $conn->query("INSERT INTO activity_logs (user_id, username, action, details, ip_address, timestamp) VALUES
@@ -1521,130 +1624,137 @@ function seedDemoHistory($conn) {
 }
 
 // inline ledger recalc for agents/buyers (standalone — config.php not loaded here)
-function recalcLedger($conn, $txTable, $partyTable, $fkCol, $partyId) {
-    $partyId = (int)$partyId;
+function recalcLedger($conn, $txTable, $partyTable, $fkCol, $partyId)
+{
+    $partyId = (int) $partyId;
     $bal = 0.00;
     $res = $conn->query("SELECT id, credit_amount, debit_amount FROM `$txTable` WHERE `$fkCol` = $partyId ORDER BY transaction_date ASC, id ASC");
     while ($r = $res->fetch_assoc()) {
-        $bal += (float)$r['credit_amount'] - (float)$r['debit_amount'];
-        $conn->query("UPDATE `$txTable` SET running_balance = " . $bal . " WHERE id = " . (int)$r['id']);
+        $bal += (float) $r['credit_amount'] - (float) $r['debit_amount'];
+        $conn->query("UPDATE `$txTable` SET running_balance = " . $bal . " WHERE id = " . (int) $r['id']);
     }
     $conn->query("UPDATE `$partyTable` SET wallet_balance = $bal, outstanding_balance = $bal WHERE id = $partyId");
 }
 
 // inline bank ledger recalc
-function recalcBankLedger($conn, $bankId) {
-    $bankId = (int)$bankId;
+function recalcBankLedger($conn, $bankId)
+{
+    $bankId = (int) $bankId;
     $opening = 0.00;
     $o = $conn->query("SELECT opening_balance FROM bank_accounts WHERE id = $bankId");
-    if ($o && ($row = $o->fetch_assoc())) $opening = (float)$row['opening_balance'];
+    if ($o && ($row = $o->fetch_assoc()))
+        $opening = (float) $row['opening_balance'];
     $bal = $opening;
     $res = $conn->query("SELECT id, transaction_type, amount FROM bank_transactions WHERE bank_account_id = $bankId ORDER BY transaction_date ASC, id ASC");
     while ($r = $res->fetch_assoc()) {
-        $bal += ($r['transaction_type'] === 'credit') ? (float)$r['amount'] : -(float)$r['amount'];
-        $conn->query("UPDATE bank_transactions SET running_balance = " . $bal . " WHERE id = " . (int)$r['id']);
+        $bal += ($r['transaction_type'] === 'credit') ? (float) $r['amount'] : -(float) $r['amount'];
+        $conn->query("UPDATE bank_transactions SET running_balance = " . $bal . " WHERE id = " . (int) $r['id']);
     }
     $conn->query("UPDATE bank_accounts SET current_balance = $bal WHERE id = $bankId");
 }
 ?>
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <link rel="icon" href="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEiGXxCe0WNNedmFqSWeF761f7Kshhc-NP5ChRQKz9fr97cO8VaarvD0KlCwqHojJVBWv-RAxfOqMI5rD4H78KnARyOc6QgwL1nRRFWf5xNQ1d9F9HfAoLPPGlTyP0GwNl4n-INMEsWLQ4Y7zJtz5bOdAnc2ePH9-uCRgshlo6BsS6gJEz6fhrxL-5U5O3sX/s160/channels4_profile.jpg">
+    <link rel="icon"
+        href="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEiGXxCe0WNNedmFqSWeF761f7Kshhc-NP5ChRQKz9fr97cO8VaarvD0KlCwqHojJVBWv-RAxfOqMI5rD4H78KnARyOc6QgwL1nRRFWf5xNQ1d9F9HfAoLPPGlTyP0GwNl4n-INMEsWLQ4Y7zJtz5bOdAnc2ePH9-uCRgshlo6BsS6gJEz6fhrxL-5U5O3sX/s160/channels4_profile.jpg">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="mobile-web-app-capable" content="yes">
     <title>Database Setup</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="styles.css?v=5.0">
 </head>
+
 <body>
-<div class="setup-wrapper">
-<div class="setup-container">
-<?php
-if ($action === 'update') {
-    echo '<h2><i class="fas fa-database"></i> Database Update</h2>';
-    echo '<p class="subtitle">Safe additive update — no existing data is deleted or modified.</p><hr>';
-    $conn = setupConn();
-    echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Database connection successful</div>';
-    setupSchema($conn);
-    setupColumnFixups($conn);
-    setupDirectories();
-    $conn->close();
-    echo '<br><div class="log-item log-success"><i class="fas fa-check-circle"></i> <strong>Update completed successfully. No data was lost.</strong></div>';
-    echo '<a href="login.php" class="btn"><i class="fas fa-sign-in-alt"></i> Go to Login Page</a>';
-    echo ' <a href="setup.php" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Back</a>';
+    <div class="setup-wrapper">
+        <div class="setup-container">
+            <?php
+            if ($action === 'update') {
+                echo '<h2><i class="fas fa-database"></i> Database Update</h2>';
+                echo '<p class="subtitle">Safe additive update — no existing data is deleted or modified.</p><hr>';
+                $conn = setupConn();
+                echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Database connection successful</div>';
+                setupSchema($conn);
+                setupColumnFixups($conn);
+                setupDirectories();
+                $conn->close();
+                echo '<br><div class="log-item log-success"><i class="fas fa-check-circle"></i> <strong>Update completed successfully. No data was lost.</strong></div>';
+                echo '<a href="login.php" class="btn"><i class="fas fa-sign-in-alt"></i> Go to Login Page</a>';
+                echo ' <a href="setup.php" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Back</a>';
 
-} elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'reset' && ($_POST['confirm'] ?? '') === 'yes' && hash_equals($_SESSION['setup_tok'] ?? '', $_POST['tok'] ?? '')) {
-    unset($_SESSION['setup_tok']); // single use
-    echo '<h2><i class="fas fa-database"></i> Database Reset</h2>';
-    echo '<p class="subtitle">Dropping all tables, recreating schema, seeding demo data.</p><hr>';
-    $conn = setupConn();
-    echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Database connection successful</div>';
-    dropAllTables($conn);
-    setupSchema($conn);
-    setupColumnFixups($conn);
-    seedDemoData($conn);
-    setupDirectories();
-    $conn->close();
-    echo '<div class="credentials-box"><strong><i class="fas fa-key"></i> Login Credentials:</strong><br><br>';
-    echo '<strong>Admin:</strong> admin@demo.com / admin123<br>';
-    echo '<strong>Manager 1:</strong> manager1@demo.com / admin123<br>';
-    echo '<strong>Manager 2:</strong> manager2@demo.com / admin123<br>';
-    echo '<strong>Agent 1:</strong> agent1@demo.com / admin123<br>';
-    echo '<strong>Agent 2:</strong> agent2@demo.com / admin123<br>';
-    echo '<strong>Agent 3:</strong> agent3@demo.com / admin123<br><br>';
-    echo '<em class="text-warning"><i class="fas fa-exclamation-triangle"></i> Change passwords after first login!</em></div>';
-    echo '<br><div class="log-item log-success"><i class="fas fa-check-circle"></i> <strong>Reset completed successfully.</strong></div>';
-    echo '<a href="login.php" class="btn"><i class="fas fa-sign-in-alt"></i> Go to Login Page</a>';
+            } elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'reset' && ($_POST['confirm'] ?? '') === 'yes' && hash_equals($_SESSION['setup_tok'] ?? '', $_POST['tok'] ?? '')) {
+                unset($_SESSION['setup_tok']); // single use
+                echo '<h2><i class="fas fa-database"></i> Database Reset</h2>';
+                echo '<p class="subtitle">Dropping all tables, recreating schema, seeding demo data.</p><hr>';
+                $conn = setupConn();
+                echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Database connection successful</div>';
+                dropAllTables($conn);
+                setupSchema($conn);
+                setupColumnFixups($conn);
+                seedDemoData($conn);
+                setupDirectories();
+                $conn->close();
+                echo '<div class="credentials-box"><strong><i class="fas fa-key"></i> Login Credentials:</strong><br><br>';
+                echo '<strong>Admin:</strong> admin@demo.com / admin123<br>';
+                echo '<strong>Manager 1:</strong> manager1@demo.com / admin123<br>';
+                echo '<strong>Manager 2:</strong> manager2@demo.com / admin123<br>';
+                echo '<strong>Agent 1:</strong> agent1@demo.com / admin123<br>';
+                echo '<strong>Agent 2:</strong> agent2@demo.com / admin123<br>';
+                echo '<strong>Agent 3:</strong> agent3@demo.com / admin123<br><br>';
+                echo '<em class="text-warning"><i class="fas fa-exclamation-triangle"></i> Change passwords after first login!</em></div>';
+                echo '<br><div class="log-item log-success"><i class="fas fa-check-circle"></i> <strong>Reset completed successfully.</strong></div>';
+                echo '<a href="login.php" class="btn"><i class="fas fa-sign-in-alt"></i> Go to Login Page</a>';
 
-} else {
-    // landing page — two action buttons
-    echo '<h2><i class="fas fa-database"></i> Database Setup</h2>';
-    echo '<p class="subtitle">Choose an action below.</p><hr>';
-    if ($fresh) {
-        echo '<div class="log-item log-info"><i class="fas fa-info-circle"></i> Fresh install detected — unauthenticated setup is allowed once.</div><br>';
-    }
-    echo '<div class="setup-actions">';
-    echo '<a href="setup.php?action=update" class="btn btn-primary"><i class="fas fa-sync-alt"></i> Run Update (Safe)</a>';
-    $_SESSION['setup_tok'] = bin2hex(random_bytes(16));
-    echo '<form method="post" action="setup.php" id="resetForm"><input type="hidden" name="action" value="reset"><input type="hidden" name="confirm" value="yes"><input type="hidden" name="tok" value="' . $_SESSION['setup_tok'] . '"></form>';
-    echo '<button type="button" class="btn btn-danger" onclick="confirmReset()"><i class="fas fa-triangle-exclamation"></i> Drop All &amp; Reseed (Destructive)</button>';
-    echo '</div>';
-    echo '<p class="subtitle setup-hint"><i class="fas fa-shield-alt"></i> Update is additive and safe to run on production. Reset deletes ALL data.</p>';
-}
-?>
-</div>
-<button class="login-theme-toggle" onclick="toggleTheme()" title="Toggle Theme">
-    <i class="fas fa-moon" id="themeIcon"></i>
-</button>
-</div>
+            } else {
+                // landing page — two action buttons
+                echo '<h2><i class="fas fa-database"></i> Database Setup</h2>';
+                echo '<p class="subtitle">Choose an action below.</p><hr>';
+                if ($fresh) {
+                    echo '<div class="log-item log-info"><i class="fas fa-info-circle"></i> Fresh install detected — unauthenticated setup is allowed once.</div><br>';
+                }
+                echo '<div class="setup-actions">';
+                echo '<a href="setup.php?action=update" class="btn btn-primary"><i class="fas fa-sync-alt"></i> Run Update (Safe)</a>';
+                $_SESSION['setup_tok'] = bin2hex(random_bytes(16));
+                echo '<form method="post" action="setup.php" id="resetForm"><input type="hidden" name="action" value="reset"><input type="hidden" name="confirm" value="yes"><input type="hidden" name="tok" value="' . $_SESSION['setup_tok'] . '"></form>';
+                echo '<button type="button" class="btn btn-danger" onclick="confirmReset()"><i class="fas fa-triangle-exclamation"></i> Drop All &amp; Reseed (Destructive)</button>';
+                echo '</div>';
+                echo '<p class="subtitle setup-hint"><i class="fas fa-shield-alt"></i> Update is additive and safe to run on production. Reset deletes ALL data.</p>';
+            }
+            ?>
+        </div>
+        <button class="login-theme-toggle" onclick="toggleTheme()" title="Toggle Theme">
+            <i class="fas fa-moon" id="themeIcon"></i>
+        </button>
+    </div>
 
-<script>
-function confirmReset() {
-    if (confirm('WARNING: This will DROP ALL TABLES and DELETE ALL DATA, then reseed demo data. This cannot be undone. Continue?')) {
-        document.getElementById('resetForm').submit(); // POST only
-    }
-}
-function initTheme() {
-    const savedTheme = localStorage.getItem('theme');
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
-        document.body.classList.add('dark-mode');
-        updateThemeIcon(true);
-    }
-}
-function toggleTheme() {
-    const isDark = document.body.classList.toggle('dark-mode');
-    localStorage.setItem('theme', isDark ? 'dark' : 'light');
-    updateThemeIcon(isDark);
-}
-function updateThemeIcon(isDark) {
-    const icon = document.getElementById('themeIcon');
-    if (icon) icon.className = isDark ? 'fas fa-sun' : 'fas fa-moon';
-}
-initTheme();
-</script>
+    <script>
+        function confirmReset() {
+            if (confirm('WARNING: This will DROP ALL TABLES and DELETE ALL DATA, then reseed demo data. This cannot be undone. Continue?')) {
+                document.getElementById('resetForm').submit(); // POST only
+            }
+        }
+        function initTheme() {
+            const savedTheme = localStorage.getItem('theme');
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
+                document.body.classList.add('dark-mode');
+                updateThemeIcon(true);
+            }
+        }
+        function toggleTheme() {
+            const isDark = document.body.classList.toggle('dark-mode');
+            localStorage.setItem('theme', isDark ? 'dark' : 'light');
+            updateThemeIcon(isDark);
+        }
+        function updateThemeIcon(isDark) {
+            const icon = document.getElementById('themeIcon');
+            if (icon) icon.className = isDark ? 'fas fa-sun' : 'fas fa-moon';
+        }
+        initTheme();
+    </script>
 </body>
+
 </html>
