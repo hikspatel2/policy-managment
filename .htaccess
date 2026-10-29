@@ -1,0 +1,27 @@
+# Developed by Mohammad Rameez Imdad (Rameez Scripts)
+# WhatsApp: https://whatsapp.rameezscripts.com/ (For Custom Projects)
+# YouTube: https://www.youtube.com/@rameezimdad (Subscribe for more!)
+
+# Disable directory listing
+Options -Indexes
+
+# Block direct web access to shared includes (only meant to be included by other PHP)
+<FilesMatch "^(config\.php|sidebar\.php|mobile-menu\.php|page_header\.php|notifications_bell\.php)$">
+    Require all denied
+</FilesMatch>
+
+# Block log / text files (error logs, etc.)
+<FilesMatch "\.(txt|log|md|sql|gz)$">
+    Require all denied
+</FilesMatch>
+
+# setup.php is allowed — it self-gates (admin-only after first install)
+
+# Security headers
+<IfModule mod_headers.c>
+    Header set X-Frame-Options "DENY"
+    Header set X-Content-Type-Options "nosniff"
+    Header set X-XSS-Protection "1; mode=block"
+    Header set Referrer-Policy "strict-origin-when-cross-origin"
+    Header set Permissions-Policy "geolocation=(), microphone=(), camera=()"
+</IfModule>
