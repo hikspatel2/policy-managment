@@ -218,6 +218,48 @@ function recalcBuyerBalances($conn, $buyerId) {
     return $bal;
 }
 
+// insurance verticals — Motor, Health, Life (extensible from insurance_categories table)
+function getInsuranceCategories($conn = null, $activeOnly = true) {
+    $close = false;
+    if ($conn === null) { $conn = getDBConnection(); $close = true; }
+    $out = [];
+    $sql = "SELECT code, name, icon FROM insurance_categories" . ($activeOnly ? " WHERE is_active = 1" : "") . " ORDER BY display_order ASC, name ASC";
+    try {
+        $res = $conn->query($sql);
+        if ($res) { while ($r = $res->fetch_assoc()) $out[$r['code']] = $r; }
+    } catch (\Throwable $e) {}
+    if ($close) $conn->close();
+    if (!$out) {
+        $out = [
+            'motor'  => ['code' => 'motor',  'name' => 'Motor Insurance',  'icon' => 'fa-car'],
+            'health' => ['code' => 'health', 'name' => 'Health Insurance', 'icon' => 'fa-heart-pulse'],
+            'life'   => ['code' => 'life',   'name' => 'Life Insurance',   'icon' => 'fa-shield-heart'],
+        ];
+    }
+    return $out;
+}
+
+function insuranceCategoryOptionsHtml($selected = 'motor', $conn = null) {
+    $cats = getInsuranceCategories($conn, true);
+    $html = '';
+    foreach ($cats as $code => $c) {
+        $sel = ($code === $selected) ? ' selected' : '';
+        $html .= '<option value="' . htmlspecialchars($code, ENT_QUOTES) . '"' . $sel . '>' . htmlspecialchars($c['name'], ENT_QUOTES) . '</option>';
+    }
+    return $html;
+}
+
+function insuranceCategoryBadge($code) {
+    $code = strtolower(trim((string)$code));
+    $map = [
+        'motor'  => ['name' => 'Motor',  'icon' => 'fa-car',          'cls' => 'chip-navy'],
+        'health' => ['name' => 'Health', 'icon' => 'fa-heart-pulse', 'cls' => 'chip-emerald'],
+        'life'   => ['name' => 'Life',   'icon' => 'fa-shield-heart', 'cls' => 'chip-purple'],
+    ];
+    $meta = $map[$code] ?? ['name' => ucfirst($code), 'icon' => 'fa-shield', 'cls' => 'chip-navy'];
+    return '<span class="chip ' . $meta['cls'] . '"><i class="fas ' . $meta['icon'] . '"></i> ' . htmlspecialchars($meta['name']) . '</span>';
+}
+
 // vehicle categories - admin-editable list; falls back to legacy 4 if table missing/empty
 function getVehicleCategories($conn = null, $activeOnly = true) {
     $close = false;

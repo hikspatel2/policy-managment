@@ -209,16 +209,31 @@ CREATE TABLE `vehicles` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------
+-- Table: insurance_categories
+-- ------------------------------------------------------------
+DROP TABLE IF EXISTS `insurance_categories`;
+CREATE TABLE `insurance_categories` (
+  `id` INT AUTO_INCREMENT PRIMARY KEY,
+  `code` VARCHAR(30) NOT NULL UNIQUE,
+  `name` VARCHAR(100) NOT NULL,
+  `icon` VARCHAR(50) NOT NULL DEFAULT 'fa-shield',
+  `display_order` INT NOT NULL DEFAULT 0,
+  `is_active` BOOLEAN NOT NULL DEFAULT TRUE,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
 -- Table: policy_entries
 -- ------------------------------------------------------------
 DROP TABLE IF EXISTS `policy_entries`;
 CREATE TABLE `policy_entries` (
   `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `insurance_category` VARCHAR(30) NOT NULL DEFAULT 'motor',
   `entry_date` DATE NOT NULL,
   `branch_id` BIGINT NOT NULL,
-  `vehicle_id` BIGINT NOT NULL,
-  `vehicle_number` VARCHAR(20) NOT NULL,
-  `vehicle_type` VARCHAR(50) NOT NULL,
+  `vehicle_id` BIGINT NULL,
+  `vehicle_number` VARCHAR(20) NULL,
+  `vehicle_type` VARCHAR(50) NULL,
   `customer_id` BIGINT NOT NULL,
   `customer_name` VARCHAR(150) NOT NULL,
   `agent_id` BIGINT NULL,
@@ -238,6 +253,24 @@ CREATE TABLE `policy_entries` (
   `net_premium_amount` DECIMAL(12,2) NOT NULL,
   `gst_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `ncb_percent` DECIMAL(5,2) NULL,
+  -- Health Insurance specific fields
+  `sum_insured` DECIMAL(14,2) NULL,
+  `plan_name` VARCHAR(150) NULL,
+  `tpa_name` VARCHAR(150) NULL,
+  `health_policy_type` ENUM('individual','family_floater','senior_citizen','critical_illness','top_up') NULL,
+  `members_count` TINYINT UNSIGNED NULL DEFAULT 1,
+  `members_details` TEXT NULL,
+  `ped_details` TEXT NULL,
+  -- Life Insurance specific fields
+  `sum_assured` DECIMAL(14,2) NULL,
+  `life_plan_type` ENUM('term','endowment','money_back','ulip','whole_life','child_plan','pension') NULL,
+  `policy_term` SMALLINT NULL,
+  `premium_paying_term` SMALLINT NULL,
+  `payment_frequency` ENUM('yearly','half_yearly','quarterly','monthly','single') NULL,
+  `nominee_name` VARCHAR(150) NULL,
+  `nominee_relation` VARCHAR(50) NULL,
+  `nominee_dob` DATE NULL,
+  -- Commission & Accounting
   `buyer_commission_basis` ENUM('premium_pct','tp_pct','od_pct','net_pct','fixed') NOT NULL,
   `buyer_commission_rate` DECIMAL(8,4) NOT NULL,
   `buyer_commission_amount` DECIMAL(12,2) NOT NULL,
@@ -267,12 +300,13 @@ CREATE TABLE `policy_entries` (
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (`branch_id`) REFERENCES `branches`(`id`) ON DELETE RESTRICT,
-  FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles`(`id`) ON DELETE RESTRICT,
+  FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles`(`id`) ON DELETE SET NULL,
   FOREIGN KEY (`customer_id`) REFERENCES `customers`(`id`) ON DELETE RESTRICT,
   FOREIGN KEY (`agent_id`) REFERENCES `agents`(`id`) ON DELETE SET NULL,
   FOREIGN KEY (`buyer_id`) REFERENCES `buyers`(`id`) ON DELETE RESTRICT,
   FOREIGN KEY (`bank_account_id`) REFERENCES `bank_accounts`(`id`) ON DELETE SET NULL,
   FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE RESTRICT,
+  INDEX `idx_insurance_category` (`insurance_category`),
   INDEX `idx_policy_number` (`policy_number`),
   INDEX `idx_entry_date` (`entry_date`),
   INDEX `idx_branch_id` (`branch_id`),
@@ -738,17 +772,29 @@ CREATE TABLE `claims` (
   `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `claim_number` VARCHAR(30) NOT NULL UNIQUE,
   `policy_entry_id` BIGINT NOT NULL,
+  `claim_category` ENUM('motor','health','life') NOT NULL DEFAULT 'motor',
   `insurer_claim_number` VARCHAR(50) NULL,
-  `claim_type` ENUM('own_damage','theft','third_party','total_loss','fire','natural_calamity','other') NOT NULL DEFAULT 'own_damage',
+  `claim_type` VARCHAR(50) NOT NULL DEFAULT 'own_damage',
   `incident_date` DATE NOT NULL,
   `intimation_date` DATE NOT NULL,
   `incident_place` VARCHAR(150) NULL,
   `description` TEXT NULL,
+  -- Motor Claim specific
   `fir_number` VARCHAR(50) NULL,
   `surveyor_name` VARCHAR(150) NULL,
   `surveyor_mobile` VARCHAR(15) NULL,
   `survey_date` DATE NULL,
   `garage_name` VARCHAR(150) NULL,
+  -- Health Claim specific
+  `hospital_name` VARCHAR(150) NULL,
+  `admission_date` DATE NULL,
+  `discharge_date` DATE NULL,
+  `doctor_name` VARCHAR(150) NULL,
+  `diagnosis` TEXT NULL,
+  -- Life Claim specific
+  `life_claim_type` ENUM('death','maturity','surrender','critical_illness','disability') NULL,
+  `date_of_event` DATE NULL,
+  -- Settlement & Status
   `settlement_mode` ENUM('cashless','reimbursement') NULL,
   `amount_claimed` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
   `amount_approved` DECIMAL(12,2) NULL,
@@ -762,6 +808,7 @@ CREATE TABLE `claims` (
   `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
   `updated_at` DATETIME NULL ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (`policy_entry_id`) REFERENCES `policy_entries`(`id`) ON DELETE RESTRICT,
+  INDEX `idx_claim_category` (`claim_category`),
   INDEX `idx_claim_status` (`status`),
   INDEX `idx_claim_policy` (`policy_entry_id`),
   INDEX `idx_claim_intimation` (`intimation_date`)
@@ -816,6 +863,12 @@ CREATE TABLE `vehicle_categories` (
 -- ============================================================
 -- SEED DATA
 -- ============================================================
+
+-- Insurance Categories
+INSERT INTO `insurance_categories` (`id`, `code`, `name`, `icon`, `display_order`, `is_active`) VALUES
+(1, 'motor', 'Motor Insurance', 'fa-car', 1, 1),
+(2, 'health', 'Health Insurance', 'fa-heart-pulse', 2, 1),
+(3, 'life', 'Life Insurance', 'fa-shield-heart', 3, 1);
 
 -- Vehicle Categories
 INSERT INTO `vehicle_categories` (`id`, `name`, `is_active`) VALUES

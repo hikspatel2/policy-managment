@@ -1,4 +1,4 @@
-﻿/*
+/*
   Developed by Rudees Digital
   Website: https://rudeesdigital.com
   Email: contact@rudeesdigital.com
@@ -7159,6 +7159,8 @@ table.dataTable tbody tr:hover td{ background:rgba(var(--navy-accent-rgb), .05);
 /* chip tones follow the active palette (user theme -> Settings default) — --c picks the source colour */
 .chip-navy   { background:var(--navy-primary); color:#fff; }
 .chip-green  { background:var(--navy-accent); color:#fff; }
+.chip-emerald{ background:#059669; color:#fff; }
+.chip-purple { background:#7c3aed; color:#fff; }
 :is(.chip-soft-navy, .chip-soft-purple) { --c: var(--navy-primary); }
 :is(.chip-link, .chip-teal, .chip-soft-green) { --c: var(--navy-accent); }
 :is(.chip-soft-amber, .chip-soft-tan) { --c: var(--navy-light); }
