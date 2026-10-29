@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Developed by Rudees Digital
  * Website: https://rudeesdigital.com
@@ -41,6 +41,9 @@ function computeCommission($basis, $rate, $total, $tp, $od, $net) {
 
 // optional production cols -> [vals, err]; $src = POST or an import row
 function policyExtras($conn, array $src, $pid, $status, $total, $net) {
+    $insCat = trim($src['insurance_category'] ?? 'motor');
+    if (!in_array($insCat, ['motor', 'health', 'life'], true)) $insCat = 'motor';
+
     $pt = trim($src['policy_type'] ?? '');
     $bt = trim($src['business_type'] ?? '');
     if ($pt !== '' && !in_array($pt, ['comprehensive', 'third_party', 'own_damage'], true)) return [null, 'Invalid policy type'];
@@ -75,16 +78,51 @@ function policyExtras($conn, array $src, $pid, $status, $total, $net) {
         if ($reason === '') return [null, 'Cancellation reason is required'];
         if (mb_strlen($reason) > 255) return [null, 'Cancellation reason max 255 characters'];
     } else $reason = null; // back to active/expired -> clear
-    return [['policy_type' => $pt ?: null, 'business_type' => $bt ?: null, 'previous_policy_id' => $prev, 'proposal_number' => $prop ?: null,
-             'idv' => $idv, 'gst_amount' => $gst, 'ncb_percent' => $ncb, 'cancellation_reason' => $reason], ''];
+
+    // Health fields
+    $sumInsured = $num('sum_insured', 9999999999.99);
+    $planName = trim($src['plan_name'] ?? '') ?: null;
+    $tpaName = trim($src['tpa_name'] ?? '') ?: null;
+    $healthType = trim($src['health_policy_type'] ?? '') ?: null;
+    $membersCount = (int)($src['members_count'] ?? 1);
+    if ($membersCount < 1) $membersCount = 1;
+    $membersDetails = trim($src['members_details'] ?? '') ?: null;
+    $pedDetails = trim($src['ped_details'] ?? '') ?: null;
+
+    // Life fields
+    $sumAssured = $num('sum_assured', 9999999999.99);
+    $lifePlanType = trim($src['life_plan_type'] ?? '') ?: null;
+    $policyTerm = !empty($src['policy_term']) ? (int)$src['policy_term'] : null;
+    $ppt = !empty($src['premium_paying_term']) ? (int)$src['premium_paying_term'] : null;
+    $payFreq = trim($src['payment_frequency'] ?? '') ?: null;
+    $nomineeName = trim($src['nominee_name'] ?? '') ?: null;
+    $nomineeRel = trim($src['nominee_relation'] ?? '') ?: null;
+    $nomineeDob = trim($src['nominee_dob'] ?? '') ?: null;
+
+    return [[
+        'insurance_category' => $insCat,
+        'policy_type' => $pt ?: null, 'business_type' => $bt ?: null, 'previous_policy_id' => $prev, 'proposal_number' => $prop ?: null,
+        'idv' => $idv, 'gst_amount' => $gst, 'ncb_percent' => $ncb, 'cancellation_reason' => $reason,
+        'sum_insured' => $sumInsured, 'plan_name' => $planName, 'tpa_name' => $tpaName,
+        'health_policy_type' => $healthType, 'members_count' => $membersCount, 'members_details' => $membersDetails, 'ped_details' => $pedDetails,
+        'sum_assured' => $sumAssured, 'life_plan_type' => $lifePlanType, 'policy_term' => $policyTerm, 'premium_paying_term' => $ppt,
+        'payment_frequency' => $payFreq, 'nominee_name' => $nomineeName, 'nominee_relation' => $nomineeRel, 'nominee_dob' => $nomineeDob
+    ], ''];
 }
 
 // write extras; cancelled_at stamped once on cancel, cleared otherwise; $updBy null on insert
 function savePolicyExtras($conn, $id, array $x, $updBy) {
-    $st = $conn->prepare("UPDATE policy_entries SET policy_type=?, business_type=?, previous_policy_id=?, proposal_number=?, idv=?, gst_amount=?, ncb_percent=?,
+    $st = $conn->prepare("UPDATE policy_entries SET
+        insurance_category=?, policy_type=?, business_type=?, previous_policy_id=?, proposal_number=?, idv=?, gst_amount=?, ncb_percent=?,
+        sum_insured=?, plan_name=?, tpa_name=?, health_policy_type=?, members_count=?, members_details=?, ped_details=?,
+        sum_assured=?, life_plan_type=?, policy_term=?, premium_paying_term=?, payment_frequency=?, nominee_name=?, nominee_relation=?, nominee_dob=?,
         cancellation_reason=?, cancelled_at = IF(status = 'cancelled', COALESCE(cancelled_at, NOW()), NULL), updated_by = COALESCE(?, updated_by) WHERE id=?");
-    $st->bind_param("ssisdddsii", $x['policy_type'], $x['business_type'], $x['previous_policy_id'], $x['proposal_number'],
-        $x['idv'], $x['gst_amount'], $x['ncb_percent'], $x['cancellation_reason'], $updBy, $id);
+    $st->bind_param("sssisdddsdssissssiisssssii",
+        $x['insurance_category'], $x['policy_type'], $x['business_type'], $x['previous_policy_id'], $x['proposal_number'],
+        $x['idv'], $x['gst_amount'], $x['ncb_percent'],
+        $x['sum_insured'], $x['plan_name'], $x['tpa_name'], $x['health_policy_type'], $x['members_count'], $x['members_details'], $x['ped_details'],
+        $x['sum_assured'], $x['life_plan_type'], $x['policy_term'], $x['premium_paying_term'], $x['payment_frequency'], $x['nominee_name'], $x['nominee_relation'], $x['nominee_dob'],
+        $x['cancellation_reason'], $updBy, $id);
     $st->execute();
     $st->close();
 }
@@ -388,7 +426,7 @@ if (isset($_GET['action'])) {
                 exit();
 
             case 'getPolicies':
-                $sql = "SELECT pe.id, pe.entry_date, pe.policy_number, pe.vehicle_number, pe.vehicle_type,
+                $sql = "SELECT pe.id, pe.insurance_category, pe.entry_date, pe.policy_number, pe.vehicle_number, pe.vehicle_type,
                                pe.customer_id, pe.customer_name, pe.company_name, pe.company_code,
                                pe.branch_id, br.name as branch_name,
                                pe.total_premium_amount, pe.tp_amount, pe.od_amount, pe.net_premium_amount,
@@ -397,6 +435,8 @@ if (isset($_GET['action'])) {
                                pe.vehicle_id, pe.payment_mode, pe.bank_name, pe.payment_in, pe.payment_out,
                                pe.status, pe.remarks, pe.policy_start_date, pe.policy_end_date,
                                pe.policy_type, pe.business_type, pe.proposal_number, pe.idv, pe.gst_amount, pe.ncb_percent, pe.cancellation_reason,
+                               pe.sum_insured, pe.plan_name, pe.tpa_name, pe.health_policy_type, pe.members_count, pe.members_details, pe.ped_details,
+                               pe.sum_assured, pe.life_plan_type, pe.policy_term, pe.premium_paying_term, pe.payment_frequency, pe.nominee_name, pe.nominee_relation, pe.nominee_dob,
                                DATE_FORMAT(pe.created_at, '%b %d, %Y') as created_at
                         FROM policy_entries pe
                         LEFT JOIN branches br ON pe.branch_id = br.id";
@@ -501,15 +541,19 @@ if (isset($_GET['action'])) {
                 }
 
                 // required fields
+                $insCat = trim($_POST['insurance_category'] ?? 'motor');
+                if (!in_array($insCat, ['motor', 'health', 'life'], true)) $insCat = 'motor';
+                $isMotor = ($insCat === 'motor');
+
                 $entryDate = trim($_POST['entry_date'] ?? '');
                 $branchId = (int)($_POST['branch_id'] ?? 0);
-                $vehicleId = (int)($_POST['vehicle_id'] ?? 0);
+                $vehicleId = $isMotor ? (int)($_POST['vehicle_id'] ?? 0) : null;
                 $customerId = (int)($_POST['customer_id'] ?? 0);
                 $buyerId = (int)($_POST['buyer_id'] ?? 0);
                 $policyNumber = trim($_POST['policy_number'] ?? '');
                 $totalPremium = (float)($_POST['total_premium_amount'] ?? 0);
-                $tpAmount = (float)($_POST['tp_amount'] ?? 0);
-                $odAmount = (float)($_POST['od_amount'] ?? 0);
+                $tpAmount = $isMotor ? (float)($_POST['tp_amount'] ?? 0) : 0.0;
+                $odAmount = $isMotor ? (float)($_POST['od_amount'] ?? 0) : 0.0;
                 $netPremium = (float)($_POST['net_premium_amount'] ?? 0);
                 $buyerBasis = trim($_POST['buyer_commission_basis'] ?? '');
                 $buyerRate = (float)($_POST['buyer_commission_rate'] ?? 0);
@@ -538,8 +582,8 @@ if (isset($_GET['action'])) {
                     exit();
                 }
 
-                // handle new vehicle
-                if (!empty($_POST['new_vehicle_number'])) {
+                // handle new vehicle (motor only)
+                if ($isMotor && !empty($_POST['new_vehicle_number'])) {
                     $newVehicleNum = strtoupper(trim($_POST['new_vehicle_number']));
                     $newVehicleCat = trim($_POST['new_vehicle_category'] ?? '');
                     $newVehicleMake = trim($_POST['new_vehicle_make'] ?? '') ?: null;
@@ -589,7 +633,7 @@ if (isset($_GET['action'])) {
                         $stmt->close();
                     }
                     // update vehicle owner if newly created
-                    if (!empty($_POST['new_vehicle_number']) && $vehicleId && !$ev) {
+                    if ($isMotor && !empty($_POST['new_vehicle_number']) && $vehicleId && !$ev) {
                         $stmt = $conn->prepare("UPDATE vehicles SET customer_id = ? WHERE id = ?");
                         $stmt->bind_param("ii", $customerId, $vehicleId);
                         $stmt->execute();
@@ -600,7 +644,7 @@ if (isset($_GET['action'])) {
                 // validate required - presence checks (0 is a valid amount)
                 $totalPremiumRaw = $_POST['total_premium_amount'] ?? '';
                 $netPremiumRaw = $_POST['net_premium_amount'] ?? '';
-                if (!$entryDate || !$branchId || !$vehicleId || !$customerId || !$buyerId || !$policyNumber || trim((string)$totalPremiumRaw) === '' || trim((string)$netPremiumRaw) === '' || !$buyerBasis || !$policyStart || !$policyEnd) {
+                if (!$entryDate || !$branchId || ($isMotor && !$vehicleId) || !$customerId || !$buyerId || !$policyNumber || trim((string)$totalPremiumRaw) === '' || trim((string)$netPremiumRaw) === '' || !$buyerBasis || !$policyStart || !$policyEnd) {
                     echo json_encode(['success' => false, 'message' => 'Please fill all required fields']);
                     exit();
                 }
@@ -635,13 +679,17 @@ if (isset($_GET['action'])) {
 
                 // auto-fill denormalized fields
                 // vehicle
-                $stmt = $conn->prepare("SELECT vehicle_number, vehicle_type FROM vehicles WHERE id = ?");
-                $stmt->bind_param("i", $vehicleId);
-                $stmt->execute();
-                $veh = $stmt->get_result()->fetch_assoc();
-                $stmt->close();
-                $vehicleNumber = $veh ? $veh['vehicle_number'] : '';
-                $vehicleType = $veh ? $veh['vehicle_type'] : '';
+                $vehicleNumber = null;
+                $vehicleType = null;
+                if ($isMotor && $vehicleId) {
+                    $stmt = $conn->prepare("SELECT vehicle_number, vehicle_type FROM vehicles WHERE id = ?");
+                    $stmt->bind_param("i", $vehicleId);
+                    $stmt->execute();
+                    $veh = $stmt->get_result()->fetch_assoc();
+                    $stmt->close();
+                    $vehicleNumber = $veh ? $veh['vehicle_number'] : null;
+                    $vehicleType = $veh ? $veh['vehicle_type'] : null;
+                }
 
                 // customer
                 $stmt = $conn->prepare("SELECT name FROM customers WHERE id = ?");
@@ -802,15 +850,19 @@ if (isset($_GET['action'])) {
                     exit();
                 }
 
+                $insCat = trim($_POST['insurance_category'] ?? 'motor');
+                if (!in_array($insCat, ['motor', 'health', 'life'], true)) $insCat = 'motor';
+                $isMotor = ($insCat === 'motor');
+
                 $entryDate = trim($_POST['entry_date'] ?? '');
                 $branchId = (int)($_POST['branch_id'] ?? 0);
-                $vehicleId = (int)($_POST['vehicle_id'] ?? 0);
+                $vehicleId = $isMotor ? (int)($_POST['vehicle_id'] ?? 0) : null;
                 $customerId = (int)($_POST['customer_id'] ?? 0);
                 $buyerId = (int)($_POST['buyer_id'] ?? 0);
                 $policyNumber = trim($_POST['policy_number'] ?? '');
                 $totalPremium = (float)($_POST['total_premium_amount'] ?? 0);
-                $tpAmount = (float)($_POST['tp_amount'] ?? 0);
-                $odAmount = (float)($_POST['od_amount'] ?? 0);
+                $tpAmount = $isMotor ? (float)($_POST['tp_amount'] ?? 0) : 0.0;
+                $odAmount = $isMotor ? (float)($_POST['od_amount'] ?? 0) : 0.0;
                 $netPremium = (float)($_POST['net_premium_amount'] ?? 0);
                 $buyerBasis = trim($_POST['buyer_commission_basis'] ?? '');
                 $buyerRate = (float)($_POST['buyer_commission_rate'] ?? 0);
@@ -835,7 +887,7 @@ if (isset($_GET['action'])) {
                 // presence checks (0 is a valid amount)
                 $totalPremiumRaw = $_POST['total_premium_amount'] ?? '';
                 $netPremiumRaw = $_POST['net_premium_amount'] ?? '';
-                if (!$entryDate || !$branchId || !$vehicleId || !$customerId || !$buyerId || !$policyNumber || trim((string)$totalPremiumRaw) === '' || trim((string)$netPremiumRaw) === '' || !$buyerBasis || !$policyStart || !$policyEnd) {
+                if (!$entryDate || !$branchId || ($isMotor && !$vehicleId) || !$customerId || !$buyerId || !$policyNumber || trim((string)$totalPremiumRaw) === '' || trim((string)$netPremiumRaw) === '' || !$buyerBasis || !$policyStart || !$policyEnd) {
                     echo json_encode(['success' => false, 'message' => 'Please fill all required fields']);
                     exit();
                 }
@@ -868,13 +920,17 @@ if (isset($_GET['action'])) {
                 $stmt->close();
 
                 // auto-fill denormalized
-                $stmt = $conn->prepare("SELECT vehicle_number, vehicle_type FROM vehicles WHERE id = ?");
-                $stmt->bind_param("i", $vehicleId);
-                $stmt->execute();
-                $veh = $stmt->get_result()->fetch_assoc();
-                $stmt->close();
-                $vehicleNumber = $veh ? $veh['vehicle_number'] : '';
-                $vehicleType = $veh ? $veh['vehicle_type'] : '';
+                $vehicleNumber = null;
+                $vehicleType = null;
+                if ($isMotor && $vehicleId) {
+                    $stmt = $conn->prepare("SELECT vehicle_number, vehicle_type FROM vehicles WHERE id = ?");
+                    $stmt->bind_param("i", $vehicleId);
+                    $stmt->execute();
+                    $veh = $stmt->get_result()->fetch_assoc();
+                    $stmt->close();
+                    $vehicleNumber = $veh ? $veh['vehicle_number'] : null;
+                    $vehicleType = $veh ? $veh['vehicle_type'] : null;
+                }
 
                 $stmt = $conn->prepare("SELECT name FROM customers WHERE id = ?");
                 $stmt->bind_param("i", $customerId);
@@ -1935,6 +1991,14 @@ if ($isAdmin) {
                 <div class="hf-field"><label for="policySearch" title="Search"><i class="fas fa-magnifying-glass"></i></label><input type="search" id="policySearch" placeholder="Search policies…" autocomplete="off"></div>
                 <div class="hf-field hf-range" title="Entry date range"><label for="filterDateFrom"><i class="fas fa-calendar-days"></i></label><input type="date" id="filterDateFrom" aria-label="From"><span class="hf-sep"><i class="fas fa-arrow-right-long"></i></span><input type="date" id="filterDateTo" aria-label="To"></div>
                 <div class="hf-seg" role="group" aria-label="Quick range"><button type="button" onclick="rsDateRange('filterDateFrom','filterDateTo',0,this)">Today</button><button type="button" onclick="rsDateRange('filterDateFrom','filterDateTo',6,this)">7 days</button><button type="button" onclick="rsDateRange('filterDateFrom','filterDateTo',29,this)">30 days</button></div>
+                <div class="hf-field" title="Vertical"><label for="filterCategory"><i class="fas fa-layer-group"></i></label>
+                    <select id="filterCategory" class="searchable">
+                        <option value="">All Verticals</option>
+                        <option value="motor">Motor Insurance</option>
+                        <option value="health">Health Insurance</option>
+                        <option value="life">Life Insurance</option>
+                    </select>
+                </div>
                 <div class="hf-field" title="Status"><label for="filterStatus"><i class="fas fa-flag"></i></label>
                     <select id="filterStatus" class="searchable">
                         <option value="">All Status</option>
@@ -2028,6 +2092,14 @@ if ($isAdmin) {
                     <div class="form-grid-3">
                         <div class="form-section-title"><i class="fas fa-info-circle"></i> Entry Details</div>
                         <div class="form-group">
+                            <label><i class="fas fa-layer-group"></i> Insurance Vertical *</label>
+                            <select id="fInsuranceCategory" name="insurance_category" class="searchable" onchange="onCategorySwitch(this.value)" required>
+                                <option value="motor">Motor Insurance</option>
+                                <option value="health">Health Insurance / Mediclaim</option>
+                                <option value="life">Life Insurance</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
                             <label><i class="fas fa-calendar-day"></i> Entry Date *</label>
                             <input type="date" id="fEntryDate" name="entry_date" required>
                         </div>
@@ -2051,9 +2123,9 @@ if ($isAdmin) {
                         </div>
                     </div>
 
-                    <!-- Vehicle & Customer -->
-                    <div class="form-grid">
-                        <div class="form-section-title"><i class="fas fa-car"></i> Vehicle & Customer</div>
+                    <!-- Motor Vehicle Details (Motor Only) -->
+                    <div class="form-grid" id="motorVehicleSection">
+                        <div class="form-section-title"><i class="fas fa-car"></i> Motor Vehicle Details</div>
 
                         <div class="form-group form-full-width">
                             <div class="toggle-switch">
@@ -2064,7 +2136,7 @@ if ($isAdmin) {
 
                         <div class="form-group" id="vehicleSelectGroup">
                             <label><i class="fas fa-car-side"></i> Vehicle *</label>
-                            <select id="fVehicle" name="vehicle_id" class="searchable" required>
+                            <select id="fVehicle" name="vehicle_id" class="searchable">
                                 <option value="">Select Vehicle</option>
                             </select>
                         </div>
@@ -2079,7 +2151,7 @@ if ($isAdmin) {
 
                         <div class="form-group" id="vehicleNewNumberGroup" style="display:none;">
                             <label><i class="fas fa-hashtag"></i> Vehicle Number *</label>
-                            <input type="text" id="fNewVehicleNumber" name="new_vehicle_number" placeholder="e.g. KL10AB1234" style="text-transform:uppercase;">
+                            <input type="text" id="fNewVehicleNumber" name="new_vehicle_number" placeholder="e.g. GJ01AB1234" style="text-transform:uppercase;">
                         </div>
                         <div class="form-group" id="vehicleNewCategoryGroup" style="display:none;">
                             <label><i class="fas fa-truck"></i> Vehicle Category *</label>
@@ -2093,12 +2165,107 @@ if ($isAdmin) {
                         </div>
                         <div class="form-group" id="vehicleNewMakeGroup" style="display:none;">
                             <label><i class="fas fa-industry"></i> Vehicle Make</label>
-                            <input type="text" id="fNewVehicleMake" name="new_vehicle_make" placeholder="e.g. Honda">
+                            <input type="text" id="fNewVehicleMake" name="new_vehicle_make" placeholder="e.g. Maruti, Honda">
                         </div>
                         <div class="form-group" id="vehicleNewModelGroup" style="display:none;">
                             <label><i class="fas fa-car"></i> Vehicle Model</label>
-                            <input type="text" id="fNewVehicleModel" name="new_vehicle_model" placeholder="e.g. Activa">
+                            <input type="text" id="fNewVehicleModel" name="new_vehicle_model" placeholder="e.g. Swift, City">
                         </div>
+                    </div>
+
+                    <!-- Health Insurance Details (Health Only) -->
+                    <div class="form-grid" id="healthDetailsSection" style="display:none;">
+                        <div class="form-section-title"><i class="fas fa-heart-pulse"></i> Health Insurance Details</div>
+                        <div class="form-group">
+                            <label><i class="fas fa-file-medical"></i> Plan / Policy Name *</label>
+                            <input type="text" id="fPlanName" name="plan_name" placeholder="e.g. Optima Secure, Star Comprehensive">
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-shield-heart"></i> Sum Insured (Coverage) *</label>
+                            <input type="number" id="fSumInsured" name="sum_insured" step="1000" min="0" placeholder="e.g. 500000">
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-hospital-user"></i> Policy Type</label>
+                            <select id="fHealthPolicyType" name="health_policy_type" class="searchable">
+                                <option value="individual">Individual</option>
+                                <option value="floater">Family Floater</option>
+                                <option value="senior">Senior Citizen</option>
+                                <option value="top_up">Top-Up / Super Top-Up</option>
+                                <option value="critical_illness">Critical Illness</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-users"></i> Covered Members Count</label>
+                            <input type="number" id="fMembersCount" name="members_count" min="1" max="25" value="1">
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-hand-holding-medical"></i> TPA (Third Party Admin)</label>
+                            <input type="text" id="fTpaName" name="tpa_name" placeholder="e.g. Medi Assist, Paramount, In-House">
+                        </div>
+                        <div class="form-group form-full-width">
+                            <label><i class="fas fa-id-card"></i> Insured Members Details (Name, Age, Relation)</label>
+                            <textarea id="fMembersDetails" name="members_details" rows="2" placeholder="e.g. Self (35), Spouse (32), Child (6)"></textarea>
+                        </div>
+                        <div class="form-group form-full-width">
+                            <label><i class="fas fa-notes-medical"></i> Pre-Existing Diseases (PED) / Notes</label>
+                            <textarea id="fPedDetails" name="ped_details" rows="2" placeholder="e.g. None / Diabetes / Hypertension"></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Life Insurance Details (Life Only) -->
+                    <div class="form-grid" id="lifeDetailsSection" style="display:none;">
+                        <div class="form-section-title"><i class="fas fa-user-shield"></i> Life Insurance Details</div>
+                        <div class="form-group">
+                            <label><i class="fas fa-award"></i> Plan Type *</label>
+                            <select id="fLifePlanType" name="life_plan_type" class="searchable">
+                                <option value="term">Term Life Insurance</option>
+                                <option value="endowment">Endowment Plan</option>
+                                <option value="ulip">ULIP (Unit Linked)</option>
+                                <option value="money_back">Money Back Plan</option>
+                                <option value="whole_life">Whole Life Plan</option>
+                                <option value="annuity">Annuity / Pension Plan</option>
+                                <option value="child">Child Plan</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-hand-holding-dollar"></i> Sum Assured (Life Cover) *</label>
+                            <input type="number" id="fSumAssured" name="sum_assured" step="1000" min="0" placeholder="e.g. 10000000">
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-hourglass-half"></i> Policy Term (Years)</label>
+                            <input type="number" id="fPolicyTerm" name="policy_term" min="1" max="100" placeholder="e.g. 30">
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-calendar-check"></i> Premium Paying Term (PPT - Years)</label>
+                            <input type="number" id="fPremiumPayingTerm" name="premium_paying_term" min="1" max="100" placeholder="e.g. 10">
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-clock"></i> Payment Frequency</label>
+                            <select id="fPaymentFrequency" name="payment_frequency" class="searchable">
+                                <option value="yearly">Yearly / Annual</option>
+                                <option value="half_yearly">Half-Yearly</option>
+                                <option value="quarterly">Quarterly</option>
+                                <option value="monthly">Monthly</option>
+                                <option value="single">Single Premium</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-user-tag"></i> Nominee Name</label>
+                            <input type="text" id="fNomineeName" name="nominee_name" placeholder="Nominee full name">
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-heart"></i> Nominee Relation</label>
+                            <input type="text" id="fNomineeRelation" name="nominee_relation" placeholder="e.g. Spouse, Father, Mother, Child">
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-cake-candles"></i> Nominee DOB</label>
+                            <input type="date" id="fNomineeDob" name="nominee_dob">
+                        </div>
+                    </div>
+
+                    <!-- Customer Details (All Verticals) -->
+                    <div class="form-grid">
+                        <div class="form-section-title"><i class="fas fa-user"></i> Customer / Policyholder Details</div>
 
                         <div class="form-group form-full-width">
                             <div class="toggle-switch">
@@ -2159,8 +2326,8 @@ if ($isAdmin) {
                             <label><i class="fas fa-calendar-times"></i> Policy End Date *</label>
                             <input type="date" id="fPolicyEnd" name="policy_end_date" required>
                         </div>
-                        <div class="form-group">
-                            <label><i class="fas fa-shield-halved"></i> Policy Type</label>
+                        <div class="form-group motor-only-field" id="policyTypeGroup">
+                            <label><i class="fas fa-shield-halved"></i> Motor Policy Type</label>
                             <select id="fPolicyType" name="policy_type" class="searchable">
                                 <option value="">Select</option>
                                 <option value="comprehensive">Comprehensive</option>
@@ -2195,11 +2362,11 @@ if ($isAdmin) {
                             <label><i class="fas fa-coins"></i> Total Premium *</label>
                             <input type="number" id="fTotalPremium" name="total_premium_amount" required step="0.01" min="0" placeholder="0.00">
                         </div>
-                        <div class="form-group">
+                        <div class="form-group motor-only-field" id="tpAmountGroup">
                             <label><i class="fas fa-shield-alt"></i> TP Amount</label>
                             <input type="number" id="fTpAmount" name="tp_amount" step="0.01" min="0" placeholder="0.00">
                         </div>
-                        <div class="form-group">
+                        <div class="form-group motor-only-field" id="odAmountGroup">
                             <label><i class="fas fa-car-crash"></i> OD Amount</label>
                             <input type="number" id="fOdAmount" name="od_amount" step="0.01" min="0" placeholder="0.00">
                         </div>
@@ -2211,11 +2378,11 @@ if ($isAdmin) {
                             <label><i class="fas fa-file-invoice-dollar"></i> GST Amount</label>
                             <input type="number" id="fGstAmount" name="gst_amount" step="0.01" min="0" placeholder="Total − Net">
                         </div>
-                        <div class="form-group">
+                        <div class="form-group motor-only-field" id="idvGroup">
                             <label><i class="fas fa-car"></i> IDV <small>(insured value)</small></label>
                             <input type="number" id="fIdv" name="idv" step="0.01" min="0" placeholder="0.00">
                         </div>
-                        <div class="form-group">
+                        <div class="form-group motor-only-field" id="ncbGroup">
                             <label><i class="fas fa-percent"></i> NCB %</label>
                             <input type="number" id="fNcb" name="ncb_percent" step="0.01" min="0" max="100" placeholder="0">
                         </div>
@@ -2654,6 +2821,17 @@ if ($isAdmin) {
                 render: function(d) { return '<input type="checkbox" class="bulk-check" data-id="' + d + '">'; }
             },
             { data: 'id', title: 'ID' },
+            {
+                data: 'insurance_category', title: 'Vertical', name: 'insurance_category',
+                render: function(d, type) {
+                    var cat = (d || 'motor').toLowerCase();
+                    var lbl = cat === 'health' ? 'Health' : (cat === 'life' ? 'Life' : 'Motor');
+                    var chip = cat === 'health' ? 'chip-emerald' : (cat === 'life' ? 'chip-purple' : 'chip-blue');
+                    var ico = cat === 'health' ? 'fa-heart-pulse' : (cat === 'life' ? 'fa-user-shield' : 'fa-car');
+                    if (type !== 'display') return lbl;
+                    return '<span class="status-badge ' + chip + '"><i class="fas ' + ico + '"></i> ' + lbl + '</span>';
+                }
+            },
             { data: 'entry_date', title: 'Date' },
             {
                 data: 'policy_number', title: 'Policy#',
@@ -2661,7 +2839,21 @@ if ($isAdmin) {
             },
             { data: 'business_type', title: 'Business Type', visible: false, render: function(d){ return BUSINESS_TYPE_LBL[d] || '-'; } },
             { data: 'proposal_number', title: 'Proposal#', visible: false, render: function(d){ return d ? escapeHtml(d) : '-'; } },
-            { data: 'vehicle_number', title: 'Vehicle#', render: function(d){ return escapeHtml(d); } },
+            {
+                data: 'vehicle_number', title: 'Vehicle / Plan',
+                render: function(d, type, row) {
+                    if (row && row.insurance_category === 'health') {
+                        var pName = row.plan_name || 'Health Plan';
+                        var si = row.sum_insured ? ' (' + fmtAmt(row.sum_insured) + ')' : '';
+                        return '<span class="badge-code" title="Sum Insured: ' + (row.sum_insured ? fmtAmt(row.sum_insured) : '-') + '"><i class="fas fa-heart-pulse"></i> ' + escapeHtml(pName + si) + '</span>';
+                    } else if (row && row.insurance_category === 'life') {
+                        var lType = (row.life_plan_type || 'Life').toUpperCase();
+                        var sa = row.sum_assured ? ' (' + fmtAmt(row.sum_assured) + ')' : '';
+                        return '<span class="badge-code" title="Sum Assured: ' + (row.sum_assured ? fmtAmt(row.sum_assured) : '-') + '"><i class="fas fa-user-shield"></i> ' + escapeHtml(lType + sa) + '</span>';
+                    }
+                    return d ? escapeHtml(d) : '-';
+                }
+            },
             { data: 'vehicle_type', title: 'Category', visible: false, render: function(d){ return escapeHtml(d); } },
             { data: 'customer_name', title: 'Customer', render: function(d){ return escapeHtml(d); } },
             { data: 'company_name', title: 'Company', name: 'company_name', render: function(d){ return escapeHtml(d); } },
@@ -2773,7 +2965,7 @@ if ($isAdmin) {
             }
         });
 
-        $('#filterDateFrom, #filterDateTo, #filterStatus, #filterBuyer, #filterBranch').off('change').on('change', applyFilters);
+        $('#filterDateFrom, #filterDateTo, #filterCategory, #filterStatus, #filterBuyer, #filterBranch').off('change').on('change', applyFilters);
         if (!IS_AGENT) $('#filterAgent').off('change').on('change', applyFilters);
 
         setupBulkSelect();
@@ -2795,7 +2987,7 @@ if ($isAdmin) {
 
     function applyFilters() {
         if (!policiesTable) return;
-        var dateFrom = $('#filterDateFrom').val(), dateTo = $('#filterDateTo').val(), status = $('#filterStatus').val();
+        var dateFrom = $('#filterDateFrom').val(), dateTo = $('#filterDateTo').val(), category = $('#filterCategory').val(), status = $('#filterStatus').val();
         var buyer = $('#filterBuyer').val(), branch = $('#filterBranch').val(), agent = !IS_AGENT ? $('#filterAgent').val() : '';
         var lo = dateFrom ? new Date(dateFrom) : null, hi = dateTo ? new Date(dateTo + 'T23:59:59') : null;
 
@@ -2810,6 +3002,7 @@ if ($isAdmin) {
             var n = daysToExpiry(r.policy_end_date);
             return r.status === 'active' && n !== null && n >= 0 && n <= 30;
         } : null);
+        rsTbWhere(policiesTable, 'category', category ? function(r) { return (r.insurance_category || 'motor') === category; } : null);
         rsTbWhere(policiesTable, 'status', status ? function(r) { return r.status === status; } : null);
         rsTbWhere(policiesTable, 'buyer', buyer ? function(r) { return r.company_name === buyer; } : null);
         rsTbWhere(policiesTable, 'branch', branch ? function(r) { return r.branch_name === branch; } : null);
@@ -2819,10 +3012,10 @@ if ($isAdmin) {
     function clearFilters() {
         $('#filterDateFrom, #filterDateTo, #policySearch').val('');
         $('.hf-seg .is-on').removeClass('is-on');
-        $('#filterStatus, #filterBuyer, #filterBranch').val('');
+        $('#filterCategory, #filterStatus, #filterBuyer, #filterBranch').val('');
         if (!IS_AGENT) $('#filterAgent').val('');
         // resync searchable dropdown display
-        ['filterStatus', 'filterBuyer', 'filterBranch', 'filterAgent'].forEach(function(id) {
+        ['filterCategory', 'filterStatus', 'filterBuyer', 'filterBranch', 'filterAgent'].forEach(function(id) {
             var el = document.getElementById(id);
             if (el) { el.value = ''; if (el.sdRefresh) el.sdRefresh(); }
         });
@@ -2950,9 +3143,44 @@ if ($isAdmin) {
     }
     $(document).on('change', '#fBusinessType', function() { if (this.value === 'new') setPrevPolicy(); });
 
+    function onCategorySwitch(cat) {
+        cat = (cat || 'motor').toLowerCase();
+        var isMotor = (cat === 'motor');
+        var isHealth = (cat === 'health');
+        var isLife = (cat === 'life');
+
+        $('#motorVehicleSection').toggle(isMotor);
+        $('.motor-only-field').toggle(isMotor);
+        $('#healthDetailsSection').toggle(isHealth);
+        $('#lifeDetailsSection').toggle(isLife);
+
+        if (isMotor) {
+            toggleVehicleMode();
+        } else {
+            $('#fVehicle').prop('required', false);
+            $('#fNewVehicleNumber').prop('required', false);
+        }
+
+        $('#fPlanName').prop('required', isHealth);
+        $('#fSumInsured').prop('required', isHealth);
+        $('#fSumAssured').prop('required', isLife);
+
+        setTimeout(function() {
+            ['fInsuranceCategory', 'fHealthPolicyType', 'fLifePlanType', 'fPaymentFrequency'].forEach(function(id) {
+                var el = document.getElementById(id);
+                if (el && el.sdRefresh) el.sdRefresh();
+            });
+        }, 50);
+    }
+
     // fill / reset the extra fields
     function fillExtras(p) {
         p = p || {};
+        var cat = (p.insurance_category || 'motor').toLowerCase();
+        $('#fInsuranceCategory').val(cat);
+        onCategorySwitch(cat);
+
+        // Motor extras
         $('#fPolicyType').val(p.policy_type || '');
         $('#fBusinessType').val(p.business_type || '');
         $('#fProposalNumber').val(p.proposal_number || '');
@@ -2960,12 +3188,35 @@ if ($isAdmin) {
         $('#fNcb').val(p.ncb_percent === null || p.ncb_percent === undefined ? '' : p.ncb_percent);
         $('#fCancelReason').val(p.cancellation_reason || '');
         setPrevPolicy(p.previous_policy_id, p.previous_policy_number);
+
+        // Health fields
+        $('#fPlanName').val(p.plan_name || '');
+        $('#fSumInsured').val(p.sum_insured === null || p.sum_insured === undefined ? '' : p.sum_insured);
+        $('#fHealthPolicyType').val(p.health_policy_type || 'individual');
+        $('#fMembersCount').val(p.members_count || 1);
+        $('#fTpaName').val(p.tpa_name || '');
+        $('#fMembersDetails').val(p.members_details || '');
+        $('#fPedDetails').val(p.ped_details || '');
+
+        // Life fields
+        $('#fLifePlanType').val(p.life_plan_type || 'term');
+        $('#fSumAssured').val(p.sum_assured === null || p.sum_assured === undefined ? '' : p.sum_assured);
+        $('#fPolicyTerm').val(p.policy_term || '');
+        $('#fPremiumPayingTerm').val(p.premium_paying_term || '');
+        $('#fPaymentFrequency').val(p.payment_frequency || 'yearly');
+        $('#fNomineeName').val(p.nominee_name || '');
+        $('#fNomineeRelation').val(p.nominee_relation || '');
+        $('#fNomineeDob').val(p.nominee_dob || '');
+
         var t = parseFloat(p.total_premium_amount), n = parseFloat(p.net_premium_amount), g = parseFloat(p.gst_amount);
         // legacy rows hold 0 -> treat as unset and suggest
         gstAuto = !p.id || isNaN(g) || g === 0 || Math.abs(g - Math.max(0, t - n)) < 0.005;
         if (gstAuto) suggestGst(); else $('#fGstAmount').val(g.toFixed(2));
         toggleCancelReason();
-        ['fPolicyType', 'fBusinessType', 'fStatus'].forEach(function(i) { var el = document.getElementById(i); if (el && el.sdRefresh) el.sdRefresh(); });
+        ['fInsuranceCategory', 'fPolicyType', 'fBusinessType', 'fStatus', 'fHealthPolicyType', 'fLifePlanType', 'fPaymentFrequency'].forEach(function(i) {
+            var el = document.getElementById(i);
+            if (el && el.sdRefresh) el.sdRefresh();
+        });
     }
 
     function toggleVehicleMode() {
@@ -3003,13 +3254,14 @@ if ($isAdmin) {
         $('#policyId').val('');
         $('#fEntryDate').val(new Date().toISOString().split('T')[0]);
         $('#fStatus').val('active');
+        $('#fInsuranceCategory').val('motor');
         $('#fVehicleNumber, #fVehicleType, #fAgentName').val('');
         $('#agentCommSection').hide();
         $('#fAgentCommAmt').addClass('calculated-input');
         $('#fNewVehicle, #fNewCustomer').prop('checked', false);
         toggleVehicleMode();
         toggleCustomerMode();
-        fillExtras(null);
+        fillExtras({ insurance_category: 'motor' });
         $('#policyModal').addClass('active');
     }
 
@@ -3167,7 +3419,28 @@ if ($isAdmin) {
                 $('#fPaymentMode').val(p.payment_mode || '');
                 $('#fRemarks').val('Renewal of ' + (p.policy_number || ''));
                 // link to the old policy - saved as previous_policy_id
-                fillExtras({ previous_policy_id: p.id, previous_policy_number: p.policy_number, business_type: 'renewal', policy_type: p.policy_type });
+                fillExtras({
+                    insurance_category: p.insurance_category || 'motor',
+                    previous_policy_id: p.id,
+                    previous_policy_number: p.policy_number,
+                    business_type: 'renewal',
+                    policy_type: p.policy_type,
+                    plan_name: p.plan_name,
+                    sum_insured: p.sum_insured,
+                    health_policy_type: p.health_policy_type,
+                    members_count: p.members_count,
+                    members_details: p.members_details,
+                    ped_details: p.ped_details,
+                    tpa_name: p.tpa_name,
+                    life_plan_type: p.life_plan_type,
+                    sum_assured: p.sum_assured,
+                    policy_term: p.policy_term,
+                    premium_paying_term: p.premium_paying_term,
+                    payment_frequency: p.payment_frequency,
+                    nominee_name: p.nominee_name,
+                    nominee_relation: p.nominee_relation,
+                    nominee_dob: p.nominee_dob
+                });
 
                 recalcBuyerComm();
                 recalcAgentComm();
@@ -3450,28 +3723,57 @@ if ($isAdmin) {
             success: function(res) {
                 if (!res.success) { Swal.fire('Error', res.message, 'error'); return; }
                 var d = res.data;
+                var cat = (d.insurance_category || 'motor').toLowerCase();
+                var catLabel = cat === 'health' ? 'Health Insurance' : (cat === 'life' ? 'Life Insurance' : 'Motor Insurance');
                 var basis = function(b, r) { return b ? String(b).replace(/_/g, ' ') + (r !== null && r !== '' && r !== undefined ? ' @ ' + r : '') : '-'; };
+                var partyLines = [];
+                if (cat === 'health') {
+                    partyLines.push((d.plan_name || 'Health Policy') + (d.sum_insured ? ' · Cover: ' + rsMoney(d.sum_insured) : ''));
+                } else if (cat === 'life') {
+                    partyLines.push(((d.life_plan_type || 'Life').toUpperCase() + ' Plan') + (d.sum_assured ? ' · Sum Assured: ' + rsMoney(d.sum_assured) : ''));
+                } else {
+                    partyLines.push((d.vehicle_number || '-') + ' · ' + (d.vehicle_type || 'Motor'));
+                }
+
                 var rows = [
-                    { k: 'Vehicle', v: d.vehicle_number + ' · ' + d.vehicle_type },
-                    { k: 'Insurer', v: d.company_name + (d.company_code ? ' (' + d.company_code + ')' : '') },
-                    { k: 'Agent', v: d.agent_name || 'Direct' },
-                    { k: 'Branch', v: d.branch_name || '-' },
-                    { k: 'Policy period', v: rsPaperDate(d.policy_start_date) + ' to ' + rsPaperDate(d.policy_end_date) },
-                    { k: 'Policy type', v: POLICY_TYPE_LBL[d.policy_type] || '-' },
-                    { k: 'Business type', v: (BUSINESS_TYPE_LBL[d.business_type] || '-') + (d.previous_policy_number ? ' · renewal of ' + d.previous_policy_number : '') },
-                    { k: 'IDV (insured value)', v: d.idv === null || d.idv === '' ? '-' : rsMoney(d.idv) },
-                    { k: 'NCB', v: d.ncb_percent === null || d.ncb_percent === '' ? '-' : (+d.ncb_percent) + '%' },
-                    { k: 'Third party (TP)', a: d.tp_amount },
-                    { k: 'Own damage (OD)', a: d.od_amount },
-                    { k: 'GST', a: d.gst_amount || 0 },
-                    { k: 'Buyer commission', v: basis(d.buyer_commission_basis, d.buyer_commission_rate), a: d.buyer_commission_amount },
-                    { k: 'Agent commission', v: basis(d.agent_commission_basis, d.agent_commission_rate), a: d.agent_commission_amount || 0 },
-                    { k: 'Payment in', v: [d.payment_in_bank_name, d.payment_mode].filter(Boolean).join(' · ') || '-', a: d.payment_in || 0 },
-                    { k: 'Payment out', v: d.payment_out_bank_name || '-', a: d.payment_out || 0 }
+                    { k: 'Vertical', v: catLabel }
                 ];
+                if (cat === 'health') {
+                    rows.push({ k: 'Plan Name', v: d.plan_name || '-' });
+                    rows.push({ k: 'Sum Insured', v: d.sum_insured ? rsMoney(d.sum_insured) : '-' });
+                    if (d.tpa_name) rows.push({ k: 'TPA', v: d.tpa_name });
+                    if (d.health_policy_type) rows.push({ k: 'Policy Type', v: d.health_policy_type.toUpperCase() });
+                    if (d.members_count) rows.push({ k: 'Members Count', v: String(d.members_count) });
+                } else if (cat === 'life') {
+                    rows.push({ k: 'Plan Type', v: (d.life_plan_type || '-').toUpperCase() });
+                    rows.push({ k: 'Sum Assured', v: d.sum_assured ? rsMoney(d.sum_assured) : '-' });
+                    if (d.policy_term) rows.push({ k: 'Policy Term', v: d.policy_term + ' Years' });
+                    if (d.premium_paying_term) rows.push({ k: 'PPT', v: d.premium_paying_term + ' Years' });
+                    if (d.payment_frequency) rows.push({ k: 'Frequency', v: d.payment_frequency.toUpperCase() });
+                    if (d.nominee_name) rows.push({ k: 'Nominee', v: d.nominee_name + (d.nominee_relation ? ' (' + d.nominee_relation + ')' : '') });
+                } else {
+                    rows.push({ k: 'Vehicle', v: (d.vehicle_number || '-') + ' · ' + (d.vehicle_type || '-') });
+                    if (d.policy_type) rows.push({ k: 'Policy type', v: POLICY_TYPE_LBL[d.policy_type] || '-' });
+                    if (d.idv) rows.push({ k: 'IDV (insured value)', v: rsMoney(d.idv) });
+                    if (d.ncb_percent) rows.push({ k: 'NCB', v: (+d.ncb_percent) + '%' });
+                    if (d.tp_amount) rows.push({ k: 'Third party (TP)', a: d.tp_amount });
+                    if (d.od_amount) rows.push({ k: 'Own damage (OD)', a: d.od_amount });
+                }
+
+                rows.push({ k: 'Insurer', v: d.company_name + (d.company_code ? ' (' + d.company_code + ')' : '') });
+                rows.push({ k: 'Agent', v: d.agent_name || 'Direct' });
+                rows.push({ k: 'Branch', v: d.branch_name || '-' });
+                rows.push({ k: 'Policy period', v: rsPaperDate(d.policy_start_date) + ' to ' + rsPaperDate(d.policy_end_date) });
+                rows.push({ k: 'Business type', v: (BUSINESS_TYPE_LBL[d.business_type] || '-') + (d.previous_policy_number ? ' · renewal of ' + d.previous_policy_number : '') });
+                rows.push({ k: 'GST', a: d.gst_amount || 0 });
+                rows.push({ k: 'Buyer commission', v: basis(d.buyer_commission_basis, d.buyer_commission_rate), a: d.buyer_commission_amount });
+                rows.push({ k: 'Agent commission', v: basis(d.agent_commission_basis, d.agent_commission_rate), a: d.agent_commission_amount || 0 });
+                rows.push({ k: 'Payment in', v: [d.payment_in_bank_name, d.payment_mode].filter(Boolean).join(' · ') || '-', a: d.payment_in || 0 });
+                rows.push({ k: 'Payment out', v: d.payment_out_bank_name || '-', a: d.payment_out || 0 });
+
                 rsReportExport(kind || 'print', {
                     title: 'Policy Summary', number: d.policy_number,
-                    party: { label: 'Insured', name: d.customer_name, lines: [d.vehicle_number + ' · ' + d.vehicle_type] },
+                    party: { label: 'Insured', name: d.customer_name, lines: partyLines },
                     info: [['Entry date', rsPaperDate(d.entry_date)], ['Start date', rsPaperDate(d.policy_start_date)], ['End date', rsPaperDate(d.policy_end_date)], ['Status', String(d.status || '').toUpperCase()]],
                     cols: [
                         { title: '#', field: '#', align: 'center' },
@@ -3522,11 +3824,21 @@ if ($isAdmin) {
         var statusCls = p.status === 'active' ? 'print-badge-active' : p.status === 'expired' ? 'print-badge-expired' : 'print-badge-cancelled';
         var statusTxt = p.status ? p.status.charAt(0).toUpperCase() + p.status.slice(1) : '-';
         var basisLbl = {'premium_pct':'Premium %','tp_pct':'TP %','od_pct':'OD %','net_pct':'Net %','fixed':'Fixed'};
+        var cat = (p.insurance_category || 'motor').toLowerCase();
+        var tabVehTitle = cat === 'health' ? '<i class="fas fa-heart-pulse"></i> Health &amp; Customer' : (cat === 'life' ? '<i class="fas fa-user-shield"></i> Life &amp; Customer' : '<i class="fas fa-car"></i> Vehicle &amp; Customer');
+        var catBadge = '';
+        if (cat === 'health') {
+            catBadge = '<span class="status-badge chip-emerald"><i class="fas fa-heart-pulse"></i> Health Insurance</span>';
+        } else if (cat === 'life') {
+            catBadge = '<span class="status-badge chip-purple"><i class="fas fa-user-shield"></i> Life Insurance</span>';
+        } else {
+            catBadge = '<span class="status-badge chip-blue"><i class="fas fa-car"></i> Motor Insurance</span>';
+        }
 
         // ---- tab nav ----
         var html = '<div class="tab-nav">';
         html += '<button type="button" class="tab-btn" data-tab="details"><i class="fas fa-file-contract"></i> Policy Details</button>';
-        html += '<button type="button" class="tab-btn" data-tab="vehcust"><i class="fas fa-car"></i> Vehicle &amp; Customer</button>';
+        html += '<button type="button" class="tab-btn" data-tab="vehcust">' + tabVehTitle + '</button>';
         html += '<button type="button" class="tab-btn" data-tab="company"><i class="fas fa-percentage"></i> Company &amp; Commissions</button>';
         html += '<button type="button" class="tab-btn" data-tab="payment"><i class="fas fa-credit-card"></i> Payments &amp; Bank</button>';
         html += '<button type="button" class="tab-btn" data-tab="documents"><i class="fas fa-folder-open"></i> Documents</button>';
@@ -3539,12 +3851,13 @@ if ($isAdmin) {
         // ---- tab: policy details ----
         html += '<div class="tab-content" data-tab="details">';
         html += '<table class="view-detail-table">';
-        html += '<tr><td class="vd-label"><i class="fas fa-hashtag"></i> Policy #</td><td class="vd-value"><span class="badge-code">' + h(p.policy_number) + '</span></td>';
-        html += '<td class="vd-label"><i class="fas fa-flag"></i> Status</td><td class="vd-value"><span class="status-badge ' + statusCls + '">' + statusTxt + '</span></td></tr>';
-        html += '<tr><td class="vd-label"><i class="fas fa-calendar"></i> Entry Date</td><td class="vd-value">' + h(p.entry_date) + '</td>';
-        html += '<td class="vd-label"><i class="fas fa-code-branch"></i> Branch</td><td class="vd-value">' + h(p.branch_name) + '</td></tr>';
-        html += '<tr><td class="vd-label"><i class="fas fa-calendar-check"></i> Start Date</td><td class="vd-value">' + h(p.policy_start_date) + '</td>';
-        html += '<td class="vd-label"><i class="fas fa-calendar-times"></i> End Date</td><td class="vd-value">' + h(p.policy_end_date) + '</td></tr>';
+        html += '<tr><td class="vd-label"><i class="fas fa-layer-group"></i> Vertical</td><td class="vd-value">' + catBadge + '</td>';
+        html += '<td class="vd-label"><i class="fas fa-hashtag"></i> Policy #</td><td class="vd-value"><span class="badge-code">' + h(p.policy_number) + '</span></td></tr>';
+        html += '<tr><td class="vd-label"><i class="fas fa-flag"></i> Status</td><td class="vd-value"><span class="status-badge ' + statusCls + '">' + statusTxt + '</span></td>';
+        html += '<td class="vd-label"><i class="fas fa-calendar"></i> Entry Date</td><td class="vd-value">' + h(p.entry_date) + '</td></tr>';
+        html += '<tr><td class="vd-label"><i class="fas fa-code-branch"></i> Branch</td><td class="vd-value">' + h(p.branch_name) + '</td>';
+        html += '<td class="vd-label"><i class="fas fa-calendar-check"></i> Start Date</td><td class="vd-value">' + h(p.policy_start_date) + '</td></tr>';
+        html += '<tr><td class="vd-label"><i class="fas fa-calendar-times"></i> End Date</td><td class="vd-value" colspan="3">' + h(p.policy_end_date) + '</td></tr>';
         // empty pairs skipped - keeps the summary panel for real facts
         if (p.policy_type || p.business_type) html += '<tr><td class="vd-label"><i class="fas fa-shield-halved"></i> Policy Type</td><td class="vd-value">' + (POLICY_TYPE_LBL[p.policy_type] ? '<span class="status-badge status-user">' + POLICY_TYPE_LBL[p.policy_type] + '</span>' : '-') + '</td>'
             + '<td class="vd-label"><i class="fas fa-briefcase"></i> Business Type</td><td class="vd-value">' + (BUSINESS_TYPE_LBL[p.business_type] || '-') + '</td></tr>';
@@ -3564,12 +3877,39 @@ if ($isAdmin) {
         }
         html += '</div>';
 
-        // ---- tab: vehicle & customer ----
+        // ---- tab: vehicle / coverage & customer ----
         html += '<div class="tab-content" data-tab="vehcust">';
+        if (cat === 'health') {
+            html += '<h4 style="margin:0 0 8px;color:var(--navy-primary);"><i class="fas fa-heart-pulse"></i> Health Insurance Coverage</h4>';
+            html += '<table class="view-detail-table">';
+            html += '<tr><td class="vd-label"><i class="fas fa-file-medical"></i> Plan Name</td><td class="vd-value"><strong>' + h(p.plan_name) + '</strong></td>';
+            html += '<td class="vd-label"><i class="fas fa-shield-heart"></i> Sum Insured</td><td class="vd-value"><strong class="wallet-amount wallet-positive">' + amt(p.sum_insured) + '</strong></td></tr>';
+            html += '<tr><td class="vd-label"><i class="fas fa-hospital-user"></i> Type</td><td class="vd-value">' + h(p.health_policy_type ? p.health_policy_type.toUpperCase() : '-') + '</td>';
+            html += '<td class="vd-label"><i class="fas fa-users"></i> Covered Members</td><td class="vd-value">' + (p.members_count || 1) + '</td></tr>';
+            html += '<tr><td class="vd-label"><i class="fas fa-hand-holding-medical"></i> TPA</td><td class="vd-value" colspan="3">' + h(p.tpa_name) + '</td></tr>';
+            if (p.members_details) html += '<tr><td class="vd-label"><i class="fas fa-id-card"></i> Member Details</td><td class="vd-value" colspan="3">' + h(p.members_details) + '</td></tr>';
+            if (p.ped_details) html += '<tr><td class="vd-label"><i class="fas fa-notes-medical"></i> Pre-Existing Conditions</td><td class="vd-value" colspan="3">' + h(p.ped_details) + '</td></tr>';
+            html += '</table>';
+        } else if (cat === 'life') {
+            html += '<h4 style="margin:0 0 8px;color:var(--navy-primary);"><i class="fas fa-user-shield"></i> Life Insurance Coverage</h4>';
+            html += '<table class="view-detail-table">';
+            html += '<tr><td class="vd-label"><i class="fas fa-award"></i> Plan Type</td><td class="vd-value"><strong>' + h(p.life_plan_type ? p.life_plan_type.toUpperCase() : '-') + '</strong></td>';
+            html += '<td class="vd-label"><i class="fas fa-hand-holding-dollar"></i> Sum Assured</td><td class="vd-value"><strong class="wallet-amount wallet-positive">' + amt(p.sum_assured) + '</strong></td></tr>';
+            html += '<tr><td class="vd-label"><i class="fas fa-hourglass-half"></i> Policy Term</td><td class="vd-value">' + (p.policy_term ? p.policy_term + ' Years' : '-') + '</td>';
+            html += '<td class="vd-label"><i class="fas fa-calendar-check"></i> PPT</td><td class="vd-value">' + (p.premium_paying_term ? p.premium_paying_term + ' Years' : '-') + '</td></tr>';
+            html += '<tr><td class="vd-label"><i class="fas fa-clock"></i> Frequency</td><td class="vd-value">' + h(p.payment_frequency ? p.payment_frequency.toUpperCase() : '-') + '</td>';
+            html += '<td class="vd-label"><i class="fas fa-user-tag"></i> Nominee</td><td class="vd-value">' + h(p.nominee_name) + (p.nominee_relation ? ' (' + h(p.nominee_relation) + ')' : '') + (p.nominee_dob ? ' - DOB: ' + h(p.nominee_dob) : '') + '</td></tr>';
+            html += '</table>';
+        } else {
+            html += '<h4 style="margin:0 0 8px;color:var(--navy-primary);"><i class="fas fa-car"></i> Motor Vehicle Details</h4>';
+            html += '<table class="view-detail-table">';
+            html += '<tr><td class="vd-label"><i class="fas fa-car-side"></i> Vehicle #</td><td class="vd-value"><span class="badge-code">' + h(p.vehicle_number) + '</span></td>';
+            html += '<td class="vd-label"><i class="fas fa-truck"></i> Category</td><td class="vd-value">' + h(p.vehicle_type) + '</td></tr>';
+            html += '</table>';
+        }
+        html += '<h4 style="margin:18px 0 8px;color:var(--navy-primary);"><i class="fas fa-user"></i> Customer &amp; Agent</h4>';
         html += '<table class="view-detail-table">';
-        html += '<tr><td class="vd-label"><i class="fas fa-car-side"></i> Vehicle #</td><td class="vd-value"><span class="badge-code">' + h(p.vehicle_number) + '</span></td>';
-        html += '<td class="vd-label"><i class="fas fa-truck"></i> Category</td><td class="vd-value">' + h(p.vehicle_type) + '</td></tr>';
-        html += '<tr><td class="vd-label"><i class="fas fa-user"></i> Customer</td><td class="vd-value">' + h(p.customer_name) + '</td>';
+        html += '<tr><td class="vd-label"><i class="fas fa-user"></i> Customer</td><td class="vd-value"><strong>' + h(p.customer_name) + '</strong></td>';
         html += '<td class="vd-label"><i class="fas fa-user-tie"></i> Agent</td><td class="vd-value">' + h(p.agent_name || 'Direct Customer') + '</td></tr>';
         html += '</table>';
         html += '</div>';
