@@ -1510,6 +1510,10 @@ if (isset($_GET['action'])) {
                     $rowNum = $idx + 2; // header is row 1
                     $rowTxn = false;
                     try {
+                        // vertical
+                        $insCategory = trim(strtolower($row['insurance_category'] ?? 'motor'));
+                        if (!in_array($insCategory, ['motor', 'health', 'life'], true)) $insCategory = 'motor';
+
                         // required fields
                         $policyNumber = trim($row['policy_number'] ?? '');
                         $customerName = trim($row['customer_name'] ?? '');
@@ -1540,16 +1544,21 @@ if (isset($_GET['action'])) {
                         $fuelType = trim($row['fuel_type'] ?? '');
                         $remarksVal = trim($row['remarks'] ?? '');
 
-                        // validate required
-                        if (!$policyNumber || !$customerName || !$customerMobile || !$vehicleNumber || !$vehicleCategory || !$companyCode || !$totalPremium || !$netPremium || !$policyStart) {
-                            $errors[] = "Row $rowNum: Missing required field(s)";
-                            continue;
-                        }
-
-                        // validate category
-                        if (!in_array($vehicleCategory, $validCategories)) {
-                            $errors[] = "Row $rowNum: Invalid vehicle category '$vehicleCategory'. Use one of: " . implode(', ', $validCategories);
-                            continue;
+                        // validate required by vertical
+                        if ($insCategory === 'motor') {
+                            if (!$policyNumber || !$customerName || !$customerMobile || !$vehicleNumber || !$vehicleCategory || !$companyCode || !$totalPremium || !$netPremium || !$policyStart) {
+                                $errors[] = "Row $rowNum: Missing required field(s) for Motor Policy (policy_number, customer_name, customer_mobile, vehicle_number, vehicle_category, company_code, total_premium, net_premium, policy_start_date)";
+                                continue;
+                            }
+                            if (!in_array($vehicleCategory, $validCategories)) {
+                                $errors[] = "Row $rowNum: Invalid vehicle category '$vehicleCategory'. Use one of: " . implode(', ', $validCategories);
+                                continue;
+                            }
+                        } else {
+                            if (!$policyNumber || !$customerName || !$customerMobile || !$companyCode || !$totalPremium || !$netPremium || !$policyStart) {
+                                $errors[] = "Row $rowNum: Missing required field(s) for " . ucfirst($insCategory) . " Policy (policy_number, customer_name, customer_mobile, company_code, total_premium, net_premium, policy_start_date)";
+                                continue;
+                            }
                         }
 
                         // validate buyer basis
@@ -1661,24 +1670,30 @@ if (isset($_GET['action'])) {
                             $stmt->close();
                         }
 
-                        // auto-create vehicle if not exists
-                        $stmt = $conn->prepare("SELECT id FROM vehicles WHERE vehicle_number = ? LIMIT 1");
-                        $stmt->bind_param("s", $vehicleNumber);
-                        $stmt->execute();
-                        $vehRow = $stmt->get_result()->fetch_assoc();
-                        $stmt->close();
-
-                        if ($vehRow) {
-                            $vehicleId = (int)$vehRow['id'];
-                        } else {
-                            $mkVal = $vehicleMake ?: null;
-                            $mdVal = $vehicleModel ?: null;
-                            $ftVal = $fuelType ?: null;
-                            $stmt = $conn->prepare("INSERT INTO vehicles (vehicle_number, vehicle_type, make, model, fuel_type, customer_id) VALUES (?, ?, ?, ?, ?, ?)");
-                            $stmt->bind_param("sssssi", $vehicleNumber, $vehicleCategory, $mkVal, $mdVal, $ftVal, $customerId);
+                        // auto-create vehicle if motor
+                        $vehicleId = null;
+                        if ($insCategory === 'motor') {
+                            $stmt = $conn->prepare("SELECT id FROM vehicles WHERE vehicle_number = ? LIMIT 1");
+                            $stmt->bind_param("s", $vehicleNumber);
                             $stmt->execute();
-                            $vehicleId = $stmt->insert_id;
+                            $vehRow = $stmt->get_result()->fetch_assoc();
                             $stmt->close();
+
+                            if ($vehRow) {
+                                $vehicleId = (int)$vehRow['id'];
+                            } else {
+                                $mkVal = $vehicleMake ?: null;
+                                $mdVal = $vehicleModel ?: null;
+                                $ftVal = $fuelType ?: null;
+                                $stmt = $conn->prepare("INSERT INTO vehicles (vehicle_number, vehicle_type, make, model, fuel_type, customer_id) VALUES (?, ?, ?, ?, ?, ?)");
+                                $stmt->bind_param("sssssi", $vehicleNumber, $vehicleCategory, $mkVal, $mdVal, $ftVal, $customerId);
+                                $stmt->execute();
+                                $vehicleId = $stmt->insert_id;
+                                $stmt->close();
+                            }
+                        } else {
+                            $vehicleNumber = null;
+                            $vehicleCategory = null;
                         }
 
                         // resolve agent by code or name
@@ -1758,18 +1773,18 @@ if (isset($_GET['action'])) {
                             od_amount, net_premium_amount, buyer_commission_basis, buyer_commission_rate, buyer_commission_amount,
                             agent_commission_basis, agent_commission_rate, agent_commission_amount, is_commission_manual,
                             bank_account_id, bank_name, payment_in, payment_out, payment_in_bank_account_id, payment_out_bank_account_id, payment_mode,
-                            policy_start_date, policy_end_date, status, remarks, created_by
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                            policy_start_date, policy_end_date, status, remarks, created_by, insurance_category
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
                         $stmt->bind_param(
-                            "siissisisisssddddsddsddiisddiisssssi",
+                            "siissisisisssddddsddsddiisddiisssssis",
                             $entryDate, $branchId, $vehicleId, $vehicleNumber, $vehicleCategory,
                             $customerId, $customerName, $agentId, $agentName, $buyerId,
                             $companyName, $companyCode, $policyNumber, $totalPremium, $tpAmount,
                             $odAmount, $netPremium, $buyerBasis, $buyerRate, $buyerCommAmt,
                             $agentBasisVal, $agentRateVal, $agentCommAmt, $isManual,
                             $bankAccId, $bankName, $payIn, $payOut, $payInBankIdVal, $payOutBankIdVal, $payModeVal,
-                            $policyStart, $policyEnd, $status, $remarksValFinal, $user_id
+                            $policyStart, $policyEnd, $status, $remarksValFinal, $user_id, $insCategory
                         );
 
                         if (!$stmt->execute()) {
@@ -4209,12 +4224,28 @@ if ($isAdmin) {
     });
 
     // template columns
-    var tplCols = ['policy_number','customer_name','customer_mobile','vehicle_number','vehicle_category','vehicle_make','vehicle_model','fuel_type','company_code','branch','agent_code','total_premium','tp_amount','od_amount','net_premium','buyer_commission_basis','buyer_commission_rate','agent_commission_basis','agent_commission_rate','payment_mode','payment_in','payment_in_bank','payment_out','payment_out_bank','policy_start_date','remarks','policy_type','business_type','previous_policy_number','proposal_number','idv','gst_amount','ncb_percent'];
+    var tplCols = [
+        'insurance_category','policy_number','customer_name','customer_mobile','company_code','branch','agent_code',
+        'vehicle_number','vehicle_category','vehicle_make','vehicle_model','fuel_type',
+        'plan_name','sum_insured','health_policy_type','tpa_name','members_count',
+        'sum_assured','life_plan_type','policy_term','premium_paying_term','payment_frequency','nominee_name','nominee_relation',
+        'total_premium','tp_amount','od_amount','net_premium','buyer_commission_basis','buyer_commission_rate','agent_commission_basis','agent_commission_rate',
+        'payment_mode','payment_in','payment_in_bank','payment_out','payment_out_bank','policy_start_date','remarks','policy_type','business_type','previous_policy_number','proposal_number','idv','gst_amount','ncb_percent'
+    ];
 
     function downloadTemplate() {
         var wb = XLSX.utils.book_new();
-        // payment_in_bank / payment_out_bank = existing bank account name or number (leave blank if no bank movement)
-        var ws = XLSX.utils.aoa_to_sheet([tplCols, ['POL-2025-100','John Doe','9876543210','MH01AB1234','Car','Maruti','Swift','Petrol','IC-001','Main Branch','AGT-001','50000','20000','30000','45000','premium_pct','15','premium_pct','10','NEFT','50000','HDFC Bank - 50100123456','0','','2025-04-01','Sample entry','comprehensive','new','','PRP-2025-100','450000','5000','20']]);
+        // 3 sample rows representing Motor, Health, and Life Insurance
+        var sampleRows = [
+            tplCols,
+            // 1. Motor Sample
+            ['motor','POL-2025-101','Ramesh Patel','9876543210','IC-001','Main Branch','AGT-001','GJ01AB1234','Car','Maruti','Swift','Petrol','','','','','','','','','','','','','25000','8000','17000','22000','premium_pct','15','premium_pct','10','NEFT','25000','HDFC Bank - 50100123456','0','','2025-04-01','Sample Motor Policy','comprehensive','new','','PRP-2025-101','450000','3000','20'],
+            // 2. Health Sample
+            ['health','POL-2025-102','Priya Sharma','9876543211','IC-001','Main Branch','AGT-001','','','','','','Family Optima Restore','500000','floater','MediAssist TPA','4','','','','','','','','18000','0','0','15000','premium_pct','15','premium_pct','10','UPI','18000','HDFC Bank - 50100123456','0','','2025-04-01','Sample Health Policy','','new','','PRP-2025-102','','3000',''],
+            // 3. Life Sample
+            ['life','POL-2025-103','Amit Shah','9876543212','IC-001','Main Branch','AGT-001','','','','','','','','','','','1000000','endowment','20','15','yearly','Neha Shah','Wife','45000','0','0','45000','premium_pct','20','premium_pct','15','Cheque','45000','HDFC Bank - 50100123456','0','','2025-04-01','Sample Life Policy','','new','','PRP-2025-103','','0','']
+        ];
+        var ws = XLSX.utils.aoa_to_sheet(sampleRows);
         XLSX.utils.book_append_sheet(wb, ws, 'Policies');
         XLSX.writeFile(wb, 'policy_upload_template.xlsx');
     }
