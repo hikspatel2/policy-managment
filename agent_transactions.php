@@ -1,9 +1,13 @@
-<?php
+﻿<?php
 /**
- * Developed by Mohammad Rameez Imdad (Rameez Scripts)
- * WhatsApp: https://whatsapp.rameezscripts.com/ (For Custom Projects)
- * YouTube: https://www.youtube.com/@rameezimdad (Subscribe for more!)
- * TikTok: https://www.tiktok.com/@aiwithrameez (Follow for more!)
+ * Developed by Rudees Digital
+ * Website: https://rudeesdigital.com
+ * Email: contact@rudeesdigital.com
+ * Website: https://rudeesdigital.com
+ * Email: contact@rudeesdigital.com
+ * Website: https://rudeesdigital.com
+  Email: contact@rudeesdigital.com
+  WhatsApp: +91 8160140848
  */
 require_once 'config.php';
 
@@ -565,9 +569,12 @@ if ($rsBA) { while ($baRow = $rsBA->fetch_assoc()) $bankAccts[] = $baRow; }
 $cxnBA->close();
 ?>
 <!--
-  Developed by Mohammad Rameez Imdad (Rameez Scripts)
-  WhatsApp: https://whatsapp.rameezscripts.com/ (For Custom Projects)
-  YouTube: https://www.youtube.com/@rameezimdad (Subscribe for more!)
+  Developed by Rudees Digital
+  Website: https://rudeesdigital.com
+  Email: contact@rudeesdigital.com
+  Website: https://rudeesdigital.com
+  Email: contact@rudeesdigital.com
+  WhatsApp: +91 8160140848
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -810,7 +817,7 @@ $cxnBA->close();
     <?php endif; ?>
 
     <script>
-        /** Developed by Rameez Scripts */
+        /** Developed by Rudees Digital */
         const IS_ADMIN = <?php echo $isAdmin ? 'true' : 'false'; ?>;
         const IS_AGENT = <?php echo $isAgent ? 'true' : 'false'; ?>;
         let txnTable = null;

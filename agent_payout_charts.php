@@ -1,9 +1,13 @@
-<?php
+﻿<?php
 /**
- * Developed by Mohammad Rameez Imdad (Rameez Scripts)
- * WhatsApp: https://whatsapp.rameezscripts.com/ (For Custom Projects)
- * YouTube: https://www.youtube.com/@rameezimdad (Subscribe for more!)
- * TikTok: https://www.tiktok.com/@aiwithrameez (Follow for more!)
+ * Developed by Rudees Digital
+ * Website: https://rudeesdigital.com
+ * Email: contact@rudeesdigital.com
+ * Website: https://rudeesdigital.com
+ * Email: contact@rudeesdigital.com
+ * Website: https://rudeesdigital.com
+  Email: contact@rudeesdigital.com
+  WhatsApp: +91 8160140848
  */
 require_once 'config.php';
 
@@ -529,9 +533,12 @@ $monthNames = ['','January','February','March','April','May','June','July','Augu
 $preAgentId = isset($_GET['agent_id']) && ctype_digit((string)$_GET['agent_id']) ? (int)$_GET['agent_id'] : 0;
 ?>
 <!--
-  Developed by Mohammad Rameez Imdad (Rameez Scripts)
-  WhatsApp: https://whatsapp.rameezscripts.com/ (For Custom Projects)
-  YouTube: https://www.youtube.com/@rameezimdad (Subscribe for more!)
+  Developed by Rudees Digital
+  Website: https://rudeesdigital.com
+  Email: contact@rudeesdigital.com
+  Website: https://rudeesdigital.com
+  Email: contact@rudeesdigital.com
+  WhatsApp: +91 8160140848
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -799,7 +806,7 @@ $preAgentId = isset($_GET['agent_id']) && ctype_digit((string)$_GET['agent_id'])
     <?php endif; ?>
 
     <script>
-        /** Developed by Mohammad Rameez Imdad (Rameez Scripts) */
+        /** Developed by Rudees Digital */
         const IS_ADMIN = <?php echo $isAdmin ? 'true' : 'false'; ?>;
         const IS_AGENT = <?php echo $isAgent ? 'true' : 'false'; ?>;
         const PRE_AGENT_ID = <?php echo $preAgentId; ?>;

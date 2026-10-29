@@ -1,9 +1,13 @@
 <?php
 /**
- * Developed by Mohammad Rameez Imdad (Rameez Scripts)
- * WhatsApp: https://whatsapp.rameezscripts.com/ (For Custom Projects)
- * YouTube: https://www.youtube.com/@rameezimdad (Subscribe for more!)
- * TikTok: https://www.tiktok.com/@aiwithrameez (Follow for more!)
+ * Developed by Rudees Digital
+ * Website: https://rudeesdigital.com
+ * Email: contact@rudeesdigital.com
+ * Website: https://rudeesdigital.com
+ * Email: contact@rudeesdigital.com
+ * Website: https://rudeesdigital.com
+  Email: contact@rudeesdigital.com
+  WhatsApp: +91 8160140848
  */
 require_once 'config.php';
 
@@ -56,7 +60,7 @@ $appName = $branding['site_name'];
                 <img src="<?php echo htmlspecialchars($logo); ?>" alt="" class="ab-logo">
                 <div class="ab-id">
                     <h1><?php echo htmlspecialchars($appName); ?> <span class="ab-ver">v5.0</span></h1>
-                    <p>A complete motor-insurance policy &amp; accounting management system · Built by <strong>Mohammad Rameez Imdad</strong> · Rameez Scripts</p>
+                    <p>A complete motor-insurance policy &amp; accounting management system · Developed by <strong>Rudees Digital</strong></p>
                 </div>
                 <ul class="ab-stats">
                     <li><strong>3</strong><span>Roles</span></li>
@@ -335,14 +339,15 @@ $appName = $branding['site_name'];
 
             <section class="ab-pane" data-pane="developer" role="tabpanel" hidden>
                 <div class="ab-dev">
-                    <img src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEiGXxCe0WNNedmFqSWeF761f7Kshhc-NP5ChRQKz9fr97cO8VaarvD0KlCwqHojJVBWv-RAxfOqMI5rD4H78KnARyOc6QgwL1nRRFWf5xNQ1d9F9HfAoLPPGlTyP0GwNl4n-INMEsWLQ4Y7zJtz5bOdAnc2ePH9-uCRgshlo6BsS6gJEz6fhrxL-5U5O3sX/s160/channels4_profile.jpg" alt="Mohammad Rameez Imdad" class="ab-dev-img">
+                    <img src="https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEiGXxCe0WNNedmFqSWeF761f7Kshhc-NP5ChRQKz9fr97cO8VaarvD0KlCwqHojJVBWv-RAxfOqMI5rD4H78KnARyOc6QgwL1nRRFWf5xNQ1d9F9HfAoLPPGlTyP0GwNl4n-INMEsWLQ4Y7zJtz5bOdAnc2ePH9-uCRgshlo6BsS6gJEz6fhrxL-5U5O3sX/s160/channels4_profile.jpg" alt="Rudees Digital" class="ab-dev-img">
                     <div class="ab-dev-txt">
-                        <h3>Mohammad Rameez Imdad</h3>
-                        <p>Rameez Scripts · custom web apps, dashboards and automation</p>
+                        <h3>Rudees Digital</h3>
+                        <p>Custom web apps, dashboards and automation</p>
                         <p class="ab-work"><i class="fas fa-envelope-open-text"></i> Let's Work Together</p>
                         <div class="ab-links">
-                            <a href="https://whatsapp.rameezscripts.com" target="_blank" rel="noopener" class="btn ab-wa"><i class="fa-brands fa-whatsapp"></i> WhatsApp</a>
-                            <a href="mailto:Contact@rameezscripts.com" class="btn btn-secondary"><i class="fa-solid fa-envelope"></i> Contact@rameezscripts.com</a>
+                            <a href="https://wa.me/918160140848" target="_blank" rel="noopener" class="btn ab-wa"><i class="fa-brands fa-whatsapp"></i> WhatsApp</a>
+                            <a href="mailto:contact@rudeesdigital.com" class="btn btn-secondary"><i class="fa-solid fa-envelope"></i> contact@rudeesdigital.com</a>
+                            <a href="https://rudeesdigital.com" target="_blank" rel="noopener" class="btn btn-secondary"><i class="fa-solid fa-globe"></i> Website</a>
                         </div>
                     </div>
                 </div>

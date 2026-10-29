@@ -1,9 +1,13 @@
-<?php
+﻿<?php
 /**
- * Developed by Mohammad Rameez Imdad (Rameez Scripts)
- * WhatsApp: https://whatsapp.rameezscripts.com/ (For Custom Projects)
- * YouTube: https://www.youtube.com/@rameezimdad (Subscribe for more!)
- * TikTok: https://www.tiktok.com/@aiwithrameez (Follow for more!)
+ * Developed by Rudees Digital
+ * Website: https://rudeesdigital.com
+ * Email: contact@rudeesdigital.com
+ * Website: https://rudeesdigital.com
+ * Email: contact@rudeesdigital.com
+ * Website: https://rudeesdigital.com
+  Email: contact@rudeesdigital.com
+  WhatsApp: +91 8160140848
  */
 require_once 'config.php';
 
@@ -1873,9 +1877,12 @@ if ($isAdmin) {
 }
 ?>
 <!--
-  Developed by Mohammad Rameez Imdad (Rameez Scripts)
-  WhatsApp: https://whatsapp.rameezscripts.com/ (For Custom Projects)
-  YouTube: https://www.youtube.com/@rameezimdad (Subscribe for more!)
+  Developed by Rudees Digital
+  Website: https://rudeesdigital.com
+  Email: contact@rudeesdigital.com
+  Website: https://rudeesdigital.com
+  Email: contact@rudeesdigital.com
+  WhatsApp: +91 8160140848
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -2398,7 +2405,7 @@ if ($isAdmin) {
     <?php endif; ?>
 
     <script>
-    /** Developed by Rameez Scripts */
+    /** Developed by Rudees Digital */
     const IS_ADMIN = <?php echo $isAdmin ? 'true' : 'false'; ?>;
     const IS_AGENT = <?php echo $isAgent ? 'true' : 'false'; ?>;
     const CAN_CREATE = <?php echo $canCreate ? 'true' : 'false'; ?>;

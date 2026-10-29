@@ -1,8 +1,10 @@
-/**
- * Developed by Mohammad Rameez Imdad (Rameez Scripts)
- * WhatsApp: https://whatsapp.rameezscripts.com/ (For Custom Projects)
- * YouTube: https://www.youtube.com/@rameezimdad (Subscribe for more!)
- * TikTok: https://www.tiktok.com/@aiwithrameez (Follow for more!)
+﻿/**
+ * Developed by Rudees Digital
+ * Website: https://rudeesdigital.com
+ * Email: contact@rudeesdigital.com
+ * Website: https://rudeesdigital.com
+  Email: contact@rudeesdigital.com
+  WhatsApp: +91 8160140848
  *
  * Shared front-end helpers — chip-row builders, table kit (Tabulator), CSV in/out.
  * Loaded on every page that renders a table. Nothing here is page-specific.

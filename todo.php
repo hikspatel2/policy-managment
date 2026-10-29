@@ -1,9 +1,13 @@
-<?php
+﻿<?php
 /**
- * Developed by Mohammad Rameez Imdad (Rameez Scripts)
- * WhatsApp: https://whatsapp.rameezscripts.com/ (For Custom Projects)
- * YouTube: https://www.youtube.com/@rameezimdad (Subscribe for more!)
- * TikTok: https://www.tiktok.com/@aiwithrameez (Follow for more!)
+ * Developed by Rudees Digital
+ * Website: https://rudeesdigital.com
+ * Email: contact@rudeesdigital.com
+ * Website: https://rudeesdigital.com
+ * Email: contact@rudeesdigital.com
+ * Website: https://rudeesdigital.com
+  Email: contact@rudeesdigital.com
+  WhatsApp: +91 8160140848
  */
 require_once 'config.php';
 
@@ -423,9 +427,12 @@ $isAdmin = ($role === 'admin');
 $canEdit = ($role === 'admin' || $role === 'manager');
 ?>
 <!--
-  Developed by Mohammad Rameez Imdad (Rameez Scripts)
-  WhatsApp: https://whatsapp.rameezscripts.com/ (For Custom Projects)
-  YouTube: https://www.youtube.com/@rameezimdad (Subscribe for more!)
+  Developed by Rudees Digital
+  Website: https://rudeesdigital.com
+  Email: contact@rudeesdigital.com
+  Website: https://rudeesdigital.com
+  Email: contact@rudeesdigital.com
+  WhatsApp: +91 8160140848
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -621,7 +628,7 @@ $canEdit = ($role === 'admin' || $role === 'manager');
     <?php endif; ?>
 
     <script>
-        /** Rameez Scripts */
+        /** Rudees Digital */
         const IS_ADMIN = <?php echo $isAdmin ? 'true' : 'false'; ?>;
         const CAN_EDIT = <?php echo $canEdit ? 'true' : 'false'; ?>;
         const ME_ID = <?php echo (int)$user_id; ?>;

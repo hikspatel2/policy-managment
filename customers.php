@@ -1,9 +1,13 @@
-<?php
+﻿<?php
 /**
- * Developed by Mohammad Rameez Imdad (Rameez Scripts)
- * WhatsApp: https://whatsapp.rameezscripts.com/ (For Custom Projects)
- * YouTube: https://www.youtube.com/@rameezimdad (Subscribe for more!)
- * TikTok: https://www.tiktok.com/@aiwithrameez (Follow for more!)
+ * Developed by Rudees Digital
+ * Website: https://rudeesdigital.com
+ * Email: contact@rudeesdigital.com
+ * Website: https://rudeesdigital.com
+ * Email: contact@rudeesdigital.com
+ * Website: https://rudeesdigital.com
+  Email: contact@rudeesdigital.com
+  WhatsApp: +91 8160140848
  */
 require_once 'config.php';
 
@@ -593,9 +597,12 @@ if (isset($_GET['action'])) {
 $isAdmin = ($role === 'admin');
 ?>
 <!--
-  Developed by Mohammad Rameez Imdad (Rameez Scripts)
-  WhatsApp: https://whatsapp.rameezscripts.com/ (For Custom Projects)
-  YouTube: https://www.youtube.com/@rameezimdad (Subscribe for more!)
+  Developed by Rudees Digital
+  Website: https://rudeesdigital.com
+  Email: contact@rudeesdigital.com
+  Website: https://rudeesdigital.com
+  Email: contact@rudeesdigital.com
+  WhatsApp: +91 8160140848
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -794,7 +801,7 @@ $isAdmin = ($role === 'admin');
     <?php endif; ?>
 
     <script>
-        /** Developed by Mohammad Rameez Imdad (Rameez Scripts) */
+        /** Developed by Rudees Digital */
         const IS_ADMIN = <?php echo $isAdmin ? 'true' : 'false'; ?>;
         const IS_AGENT = <?php echo $role === 'agent' ? 'true' : 'false'; ?>;
         let custTable = null;

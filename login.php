@@ -1,9 +1,13 @@
 <?php
 /**
- * Developed by Mohammad Rameez Imdad (Rameez Scripts)
- * WhatsApp: https://whatsapp.rameezscripts.com/ (For Custom Projects)
- * YouTube: https://www.youtube.com/@rameezimdad (Subscribe for more!)
- * TikTok: https://www.tiktok.com/@aiwithrameez (Follow for more!)
+ * Developed by Rudees Digital
+ * Website: https://rudeesdigital.com
+ * Email: contact@rudeesdigital.com
+ * Website: https://rudeesdigital.com
+ * Email: contact@rudeesdigital.com
+ * Website: https://rudeesdigital.com
+  Email: contact@rudeesdigital.com
+  WhatsApp: +91 8160140848
  */
 require_once 'config.php';
 
@@ -298,8 +302,9 @@ $titles = ['login' => 'Login', 'forgot' => 'Forgot Password', 'reset' => 'Set a 
             <div class="auth-contact">
                 <span class="auth-contact-title"><i class="fas fa-handshake"></i> Let's Work Together</span>
                 <div class="auth-contact-links">
-                    <a href="https://whatsapp.rameezscripts.com" target="_blank" rel="noopener"><i class="fa-brands fa-whatsapp"></i> WhatsApp</a>
-                    <a href="mailto:Contact@rameezscripts.com"><i class="fa-solid fa-envelope"></i> Contact@rameezscripts.com</a>
+                    <a href="https://wa.me/918160140848" target="_blank" rel="noopener"><i class="fa-brands fa-whatsapp"></i> WhatsApp</a>
+                    <a href="mailto:contact@rudeesdigital.com"><i class="fa-solid fa-envelope"></i> contact@rudeesdigital.com</a>
+                    <a href="https://rudeesdigital.com" target="_blank" rel="noopener"><i class="fa-solid fa-globe"></i> Rudees Digital</a>
                 </div>
             </div>
         </div>
