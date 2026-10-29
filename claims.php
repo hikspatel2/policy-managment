@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Developed by Rudees Digital
  * Website: https://rudeesdigital.com
@@ -24,23 +24,38 @@ $isStaff = $isAdmin || $role === 'manager';
 $isAgent = $role === 'agent';
 if (!$isStaff && !$isAgent) { header("Location: dashboard.php"); exit(); }
 
+const CLM_CATEGORIES = ['motor' => 'Motor', 'health' => 'Health', 'life' => 'Life'];
 const CLM_TYPES = ['own_damage' => 'Own Damage', 'theft' => 'Theft', 'third_party' => 'Third Party', 'total_loss' => 'Total Loss', 'fire' => 'Fire', 'natural_calamity' => 'Natural Calamity', 'other' => 'Other'];
+const CLM_HEALTH_TYPES = ['cashless' => 'Cashless Hospitalization', 'reimbursement' => 'Reimbursement', 'pre_post_hosp' => 'Pre/Post Hospitalization', 'day_care' => 'Day Care Procedure', 'critical_illness' => 'Critical Illness Benefit', 'other' => 'Other'];
+const CLM_LIFE_TYPES = ['death' => 'Death Claim', 'maturity' => 'Maturity / Survival Benefit', 'surrender' => 'Surrender Value', 'critical_illness' => 'Critical Illness Claim', 'disability' => 'Disability Benefit'];
 const CLM_STATUS = ['intimated' => 'Intimated', 'survey' => 'Survey', 'approved' => 'Approved', 'settled' => 'Settled', 'rejected' => 'Rejected', 'withdrawn' => 'Withdrawn'];
-const CLM_DOCS = ['claim_form' => 'Claim form', 'fir' => 'FIR', 'estimate' => 'Estimate', 'survey_report' => 'Survey report', 'repair_invoice' => 'Repair invoice', 'photo' => 'Photo', 'settlement_letter' => 'Settlement letter', 'other' => 'Other'];
+const CLM_DOCS = [
+    'claim_form' => 'Claim form', 'fir' => 'FIR', 'estimate' => 'Estimate', 'survey_report' => 'Survey report', 'repair_invoice' => 'Repair invoice', 'photo' => 'Photo',
+    'hospital_bill' => 'Hospital / Discharge Summary', 'medical_report' => 'Medical / Lab Report',
+    'death_certificate' => 'Death Certificate', 'nominee_kyc' => 'Nominee ID / KYC', 'policy_bond' => 'Original Policy Document',
+    'settlement_letter' => 'Settlement letter', 'other' => 'Other'
+];
 // saved cols + bind letter — insert / update are built from this
-const CLM_COLS = ['policy_entry_id' => 'i', 'insurer_claim_number' => 's', 'claim_type' => 's', 'incident_date' => 's', 'intimation_date' => 's',
+const CLM_COLS = [
+    'policy_entry_id' => 'i', 'claim_category' => 's', 'insurer_claim_number' => 's', 'claim_type' => 's', 'incident_date' => 's', 'intimation_date' => 's',
     'incident_place' => 's', 'description' => 's', 'fir_number' => 's', 'surveyor_name' => 's', 'surveyor_mobile' => 's', 'survey_date' => 's',
-    'garage_name' => 's', 'settlement_mode' => 's', 'amount_claimed' => 'd', 'amount_approved' => 'd', 'amount_settled' => 'd',
-    'settlement_date' => 's', 'status' => 's', 'rejection_reason' => 's', 'remarks' => 's'];
+    'garage_name' => 's', 'hospital_name' => 's', 'admission_date' => 's', 'discharge_date' => 's', 'doctor_name' => 's', 'diagnosis' => 's',
+    'life_claim_type' => 's', 'date_of_event' => 's',
+    'settlement_mode' => 's', 'amount_claimed' => 'd', 'amount_approved' => 'd', 'amount_settled' => 'd',
+    'settlement_date' => 's', 'status' => 's', 'rejection_reason' => 's', 'remarks' => 's'
+];
 // text cols -> [max, label]
-const CLM_TXT = ['insurer_claim_number' => [50, 'Insurer claim no'], 'incident_place' => [150, 'Incident place'], 'description' => [2000, 'Description'],
+const CLM_TXT = [
+    'insurer_claim_number' => [50, 'Insurer claim no'], 'incident_place' => [150, 'Incident place'], 'description' => [2000, 'Description'],
     'fir_number' => [50, 'FIR no'], 'surveyor_name' => [150, 'Surveyor name'], 'surveyor_mobile' => [15, 'Surveyor mobile'], 'garage_name' => [150, 'Garage'],
-    'rejection_reason' => [255, 'Rejection reason'], 'remarks' => [500, 'Remarks']];
+    'hospital_name' => [150, 'Hospital name'], 'doctor_name' => [150, 'Doctor name'], 'diagnosis' => [2000, 'Diagnosis'],
+    'rejection_reason' => [255, 'Rejection reason'], 'remarks' => [500, 'Remarks']
+];
 // agent: add = intimation fields only, edit = these while still intimated
-const CLM_AGENT_ADD = ['policy_entry_id', 'claim_type', 'incident_date', 'intimation_date', 'incident_place', 'description', 'fir_number', 'amount_claimed', 'insurer_claim_number'];
-const CLM_AGENT_EDIT = ['claim_type', 'incident_date', 'incident_place', 'description', 'fir_number', 'amount_claimed'];
-const CLM_SELECT = "SELECT c.*, pe.policy_number, pe.vehicle_id, pe.vehicle_number, pe.vehicle_type, pe.customer_name, pe.company_name, pe.agent_id, pe.agent_name,
-        pe.policy_start_date, pe.policy_end_date, pe.idv, pe.status AS policy_status, cu.mobile AS customer_mobile, a.user_id AS agent_user_id,
+const CLM_AGENT_ADD = ['policy_entry_id', 'claim_type', 'incident_date', 'intimation_date', 'incident_place', 'description', 'fir_number', 'amount_claimed', 'insurer_claim_number', 'hospital_name', 'admission_date', 'discharge_date', 'doctor_name', 'diagnosis', 'life_claim_type', 'date_of_event'];
+const CLM_AGENT_EDIT = ['claim_type', 'incident_date', 'incident_place', 'description', 'fir_number', 'amount_claimed', 'hospital_name', 'admission_date', 'discharge_date', 'doctor_name', 'diagnosis', 'life_claim_type', 'date_of_event'];
+const CLM_SELECT = "SELECT c.*, pe.policy_number, pe.insurance_category, pe.vehicle_id, pe.vehicle_number, pe.vehicle_type, pe.customer_name, pe.company_name, pe.agent_id, pe.agent_name,
+        pe.policy_start_date, pe.policy_end_date, pe.idv, pe.sum_insured, pe.sum_assured, pe.plan_name, pe.status AS policy_status, cu.mobile AS customer_mobile, a.user_id AS agent_user_id,
         u.name AS created_by_name, u2.name AS updated_by_name, (SELECT COUNT(*) FROM claim_documents d WHERE d.claim_id = c.id) AS doc_count
     FROM claims c
     JOIN policy_entries pe ON pe.id = c.policy_entry_id
@@ -71,7 +86,7 @@ function clmDate($v) {
 function clmPolicy(mysqli $conn, int $pid): ?array {
     static $memo = [];
     if (array_key_exists($pid, $memo)) return $memo[$pid];
-    $st = $conn->prepare("SELECT pe.id, pe.policy_number, pe.vehicle_number, pe.customer_name, pe.company_name, pe.agent_id, pe.policy_start_date, pe.policy_end_date, pe.status, pe.idv, a.user_id AS agent_user_id
+    $st = $conn->prepare("SELECT pe.id, pe.policy_number, pe.insurance_category, pe.vehicle_number, pe.customer_name, pe.company_name, pe.agent_id, pe.policy_start_date, pe.policy_end_date, pe.status, pe.idv, pe.sum_insured, pe.sum_assured, pe.plan_name, a.user_id AS agent_user_id
         FROM policy_entries pe LEFT JOIN agents a ON a.id = pe.agent_id WHERE pe.id = ?");
     $st->bind_param('i', $pid);
     $st->execute();
@@ -87,7 +102,8 @@ function clmCheck(mysqli $conn, array $in, ?array $old, bool $admin): array {
     $pol = $pid > 0 ? clmPolicy($conn, $pid) : null;
     if (!$pol || !canSeePolicy($conn, $pid)) return $bad('Select a valid policy');
     if ($pol['status'] === 'cancelled' && (int)($old['policy_entry_id'] ?? 0) !== $pid) return $bad("Policy {$pol['policy_number']} is cancelled");
-    $d = ['policy_entry_id' => $pid];
+    $cat = $pol['insurance_category'] ?? 'motor';
+    $d = ['policy_entry_id' => $pid, 'claim_category' => $cat];
 
     foreach (CLM_TXT as $k => [$max, $lbl]) {
         $v = trim((string)($in[$k] ?? ''));
@@ -98,13 +114,29 @@ function clmCheck(mysqli $conn, array $in, ?array $old, bool $admin): array {
         $d['surveyor_mobile'] = preg_replace('/[\s-]/', '', $d['surveyor_mobile']);
         if (!preg_match('/^\+?\d{7,14}$/', $d['surveyor_mobile'])) return $bad('Surveyor mobile must be 7-14 digits');
     }
-    $d['claim_type'] = (string)($in['claim_type'] ?? '') ?: 'own_damage';
-    if (!isset(CLM_TYPES[$d['claim_type']])) return $bad('Invalid claim type');
+
+    // claim type based on vertical
+    $ct = (string)($in['claim_type'] ?? '') ?: ($cat === 'health' ? 'cashless' : ($cat === 'life' ? 'death' : 'own_damage'));
+    if ($cat === 'health') {
+        if (!isset(CLM_HEALTH_TYPES[$ct]) && !isset(CLM_TYPES[$ct])) $ct = 'cashless';
+    } else if ($cat === 'life') {
+        if (!isset(CLM_LIFE_TYPES[$ct]) && !isset(CLM_TYPES[$ct])) $ct = 'death';
+    } else {
+        if (!isset(CLM_TYPES[$ct])) return $bad('Invalid motor claim type');
+    }
+    $d['claim_type'] = $ct;
+
+    // life claim type
+    $lct = trim((string)($in['life_claim_type'] ?? ''));
+    if ($lct === '' && $cat === 'life') $lct = $ct;
+    if ($lct !== '' && !isset(CLM_LIFE_TYPES[$lct])) $lct = 'death';
+    $d['life_claim_type'] = $lct ?: null;
+
     $sm = trim((string)($in['settlement_mode'] ?? ''));
     if ($sm !== '' && !in_array($sm, ['cashless', 'reimbursement'], true)) return $bad('Invalid settlement mode');
     $d['settlement_mode'] = $sm ?: null;
 
-    foreach (['incident_date' => 'Incident date', 'intimation_date' => 'Intimation date', 'survey_date' => 'Survey date', 'settlement_date' => 'Settlement date'] as $k => $lbl) {
+    foreach (['incident_date' => 'Incident date', 'intimation_date' => 'Intimation date', 'survey_date' => 'Survey date', 'settlement_date' => 'Settlement date', 'admission_date' => 'Admission date', 'discharge_date' => 'Discharge date', 'date_of_event' => 'Date of event'] as $k => $lbl) {
         $d[$k] = clmDate($in[$k] ?? '');
         if ($d[$k] === false) return $bad("$lbl must be a valid date (YYYY-MM-DD)");
     }
@@ -130,8 +162,19 @@ function clmCheck(mysqli $conn, array $in, ?array $old, bool $admin): array {
     $s = (string)($in['status'] ?? '') ?: 'intimated';
     if (!isset(CLM_STATUS[$s])) return $bad('Invalid status');
     if ($old && $old['status'] !== $s && in_array($old['status'], ['settled', 'rejected'], true) && !$admin) return $bad('Only an admin can reopen a settled or rejected claim');
-    $idv = (float)($pol['idv'] ?? 0);
-    if ($d['amount_approved'] && $idv > 0 && $d['amount_approved'] > $idv) return $bad('Amount approved cannot exceed the policy IDV (' . number_format($idv, 2) . ')');
+
+    // coverage limit checks by category
+    if ($cat === 'motor') {
+        $idv = (float)($pol['idv'] ?? 0);
+        if ($d['amount_approved'] && $idv > 0 && $d['amount_approved'] > $idv) return $bad('Amount approved cannot exceed the policy IDV (' . number_format($idv, 2) . ')');
+    } else if ($cat === 'health') {
+        $si = (float)($pol['sum_insured'] ?? 0);
+        if ($d['amount_approved'] && $si > 0 && $d['amount_approved'] > $si) return $bad('Amount approved cannot exceed the policy Sum Insured (' . number_format($si, 2) . ')');
+    } else if ($cat === 'life') {
+        $sa = (float)($pol['sum_assured'] ?? 0);
+        if ($d['amount_approved'] && $sa > 0 && $d['amount_approved'] > $sa) return $bad('Amount approved cannot exceed the policy Sum Assured (' . number_format($sa, 2) . ')');
+    }
+
     if ($s === 'approved' && !($d['amount_approved'] > 0)) return $bad('Enter the amount approved to mark the claim approved');
     if ($s === 'settled') {
         if (!($d['amount_settled'] > 0)) return $bad('Enter the amount settled to mark the claim settled');
@@ -190,8 +233,18 @@ function clmFind(mysqli $conn, int $id): ?array {
     return $r && canSeePolicy($conn, $r['policy_entry_id']) ? clmRow($r) : null;
 }
 function clmRow(array $r): array {
-    foreach (['amount_claimed', 'amount_approved', 'amount_settled', 'idv'] as $k) $r[$k] = $r[$k] === null ? null : (float)$r[$k];
-    $r['claim_type_label'] = CLM_TYPES[$r['claim_type']] ?? $r['claim_type'];
+    foreach (['amount_claimed', 'amount_approved', 'amount_settled', 'idv', 'sum_insured', 'sum_assured'] as $k) {
+        if (isset($r[$k])) $r[$k] = $r[$k] === null ? null : (float)$r[$k];
+    }
+    $cat = $r['claim_category'] ?? ($r['insurance_category'] ?? 'motor');
+    $r['claim_category'] = $cat;
+    if ($cat === 'health') {
+        $r['claim_type_label'] = CLM_HEALTH_TYPES[$r['claim_type']] ?? (CLM_TYPES[$r['claim_type']] ?? $r['claim_type']);
+    } else if ($cat === 'life') {
+        $r['claim_type_label'] = CLM_LIFE_TYPES[$r['life_claim_type'] ?? $r['claim_type']] ?? (CLM_TYPES[$r['claim_type']] ?? $r['claim_type']);
+    } else {
+        $r['claim_type_label'] = CLM_TYPES[$r['claim_type']] ?? $r['claim_type'];
+    }
     $r['status_label'] = CLM_STATUS[$r['status']] ?? $r['status'];
     return $r;
 }
@@ -217,8 +270,16 @@ function clmNotify(mysqli $conn, array $uids, int $actor, string $title, string 
     }
 }
 function clmNotifyNew(mysqli $conn, array $pol, string $no, array $d, int $actor): void {
+    $cat = $pol['insurance_category'] ?? 'motor';
+    $typeLbl = $d['claim_type'];
+    if ($cat === 'health') $typeLbl = CLM_HEALTH_TYPES[$d['claim_type']] ?? $d['claim_type'];
+    elseif ($cat === 'life') $typeLbl = CLM_LIFE_TYPES[$d['life_claim_type'] ?? $d['claim_type']] ?? $d['claim_type'];
+    else $typeLbl = CLM_TYPES[$d['claim_type']] ?? $d['claim_type'];
+
+    $subject = $cat === 'health' ? ($pol['plan_name'] ? "Plan: {$pol['plan_name']}" : "Health Policy") : ($cat === 'life' ? "Life Policy" : "Vehicle: {$pol['vehicle_number']}");
+
     clmNotify($conn, array_merge(clmAdmins($conn), [(int)$pol['agent_user_id']]), $actor, "New Claim: $no",
-        "Claim $no (" . CLM_TYPES[$d['claim_type']] . ") intimated on policy {$pol['policy_number']} — vehicle {$pol['vehicle_number']}, {$pol['customer_name']}. Amount claimed " . number_format($d['amount_claimed'], 2) . '.', $pol);
+        "Claim $no ($typeLbl) intimated on policy {$pol['policy_number']} — $subject, {$pol['customer_name']}. Amount claimed " . number_format($d['amount_claimed'], 2) . '.', $pol);
 }
 
 // stored files under uploads/claims only, then drop empty folders
@@ -258,11 +319,16 @@ if (isset($_GET['action'])) {
 
             case 'getPolicyOptions':
                 // claimable policies — cancelled out, agent own only
-                $st = $conn->prepare("SELECT id, policy_number, vehicle_number, customer_name, company_name, policy_start_date, policy_end_date, idv
+                $st = $conn->prepare("SELECT id, policy_number, insurance_category, vehicle_number, plan_name, sum_insured, sum_assured, customer_name, company_name, policy_start_date, policy_end_date, idv
                     FROM policy_entries WHERE status <> 'cancelled'" . ($isAgent ? ' AND agent_id = ?' : '') . ' ORDER BY policy_end_date DESC, id DESC');
                 if ($isAgent) { $aid = agentIdForUser($conn, $user_id) ?? 0; $st->bind_param('i', $aid); }
                 $st->execute();
-                $rows = array_map(function ($r) { $r['idv'] = $r['idv'] === null ? null : (float)$r['idv']; return $r; }, $st->get_result()->fetch_all(MYSQLI_ASSOC));
+                $rows = array_map(function ($r) {
+                    $r['idv'] = $r['idv'] === null ? null : (float)$r['idv'];
+                    $r['sum_insured'] = $r['sum_insured'] === null ? null : (float)$r['sum_insured'];
+                    $r['sum_assured'] = $r['sum_assured'] === null ? null : (float)$r['sum_assured'];
+                    return $r;
+                }, $st->get_result()->fetch_all(MYSQLI_ASSOC));
                 $st->close();
                 clmOut(['success' => true, 'data' => $rows]);
 
@@ -511,9 +577,23 @@ if (isset($_GET['action'])) {
             ?>
             <div data-head-filter>
                 <div class="hf-field"><label for="claimSearch" title="Search"><i class="fas fa-magnifying-glass"></i></label><input type="search" id="claimSearch" placeholder="Search claims…" autocomplete="off"></div>
+                <div class="hf-field" title="Vertical"><label for="filterCategory"><i class="fas fa-layer-group"></i></label><select id="filterCategory" class="searchable">
+                    <option value="">All Verticals</option>
+                    <option value="motor">Motor Insurance</option>
+                    <option value="health">Health Insurance</option>
+                    <option value="life">Life Insurance</option>
+                </select></div>
                 <div class="hf-field" title="Claim type"><label for="filterType"><i class="fas fa-car-burst"></i></label><select id="filterType" class="searchable">
                     <option value="">All Types</option>
+                    <optgroup label="Motor Claims">
                     <?php foreach (CLM_TYPES as $k => $v): ?><option value="<?php echo $k; ?>"><?php echo $v; ?></option><?php endforeach; ?>
+                    </optgroup>
+                    <optgroup label="Health Claims">
+                    <?php foreach (CLM_HEALTH_TYPES as $k => $v): ?><option value="<?php echo $k; ?>"><?php echo $v; ?></option><?php endforeach; ?>
+                    </optgroup>
+                    <optgroup label="Life Claims">
+                    <?php foreach (CLM_LIFE_TYPES as $k => $v): ?><option value="<?php echo $k; ?>"><?php echo $v; ?></option><?php endforeach; ?>
+                    </optgroup>
                 </select></div>
                 <div class="hf-field" title="Insurer"><label for="filterInsurer"><i class="fas fa-building-shield"></i></label><select id="filterInsurer" class="searchable">
                     <option value="">All Insurers</option>
@@ -554,7 +634,7 @@ if (isset($_GET['action'])) {
     <div class="modal-overlay" id="viewModal">
         <div class="modal modal-wide" onclick="event.stopPropagation()">
             <div class="modal-header">
-                <h3 id="viewModalTitle"><i class="fas fa-car-burst"></i> Claim Details</h3>
+                <h3 id="viewModalTitle"><i class="fas fa-shield-halved"></i> Claim Details</h3>
                 <button class="close-btn" onclick="closeViewModal()" aria-label="Close"><i class="fas fa-times"></i></button>
             </div>
             <div class="modal-body" id="viewModalBody"></div>
@@ -566,7 +646,7 @@ if (isset($_GET['action'])) {
     <div class="modal-overlay" id="claimModal">
         <div class="modal" onclick="event.stopPropagation()">
             <div class="modal-header">
-                <h3 id="modalTitle"><i class="fas fa-car-burst"></i> Add Claim</h3>
+                <h3 id="modalTitle"><i class="fas fa-shield-halved"></i> Add Claim</h3>
                 <button class="close-btn" onclick="closeModal()" aria-label="Close"><i class="fas fa-times"></i></button>
             </div>
             <div class="modal-body">
@@ -583,17 +663,17 @@ if (isset($_GET['action'])) {
                             <small class="field-hint" id="cPolicyInfo"></small>
                         </div>
                         <div class="form-group">
-                            <label><i class="fas fa-car-burst"></i> Claim Type *</label>
+                            <label><i class="fas fa-tag"></i> Claim Type *</label>
                             <select id="cType" name="claim_type" class="searchable" required>
                                 <?php foreach (CLM_TYPES as $k => $v): ?><option value="<?php echo $k; ?>"><?php echo $v; ?></option><?php endforeach; ?>
                             </select>
                         </div>
                         <div class="form-group">
-                            <label><i class="fas fa-money-bill-wave"></i> Amount Claimed</label>
+                            <label><i class="fas fa-money-bill-wave"></i> Amount Claimed *</label>
                             <input type="number" id="cAmtClaimed" name="amount_claimed" min="0" step="0.01" placeholder="0.00">
                         </div>
                         <div class="form-group">
-                            <label><i class="fas fa-calendar-xmark"></i> Incident Date *</label>
+                            <label><i class="fas fa-calendar-xmark"></i> Incident / Event Date *</label>
                             <input type="date" id="cIncDate" name="incident_date" required>
                         </div>
                         <div class="form-group">
@@ -604,7 +684,7 @@ if (isset($_GET['action'])) {
                             <label><i class="fas fa-location-dot"></i> Incident Place</label>
                             <input type="text" id="cPlace" name="incident_place" maxlength="150" placeholder="Road, area, city">
                         </div>
-                        <div class="form-group" id="cFirGroup" hidden>
+                        <div class="form-group clm-motor-only" id="cFirGroup" hidden>
                             <label><i class="fas fa-file-shield"></i> FIR No</label>
                             <input type="text" id="cFir" name="fir_number" maxlength="50" placeholder="Police FIR number" disabled>
                         </div>
@@ -612,6 +692,43 @@ if (isset($_GET['action'])) {
                             <label><i class="fas fa-receipt"></i> Insurer Claim No</label>
                             <input type="text" id="cInsurerNo" name="insurer_claim_number" maxlength="50" placeholder="Reference from the insurer">
                         </div>
+
+                        <!-- Health Specific Fields -->
+                        <div class="form-section-title clm-health-only" style="display:none;"><i class="fas fa-hospital-user"></i> Hospital & Treatment Details</div>
+                        <div class="form-group clm-health-only" style="display:none;">
+                            <label><i class="fas fa-hospital"></i> Hospital Name</label>
+                            <input type="text" id="cHospital" name="hospital_name" maxlength="150" placeholder="Hospital name & city">
+                        </div>
+                        <div class="form-group clm-health-only" style="display:none;">
+                            <label><i class="fas fa-user-doctor"></i> Treating Doctor</label>
+                            <input type="text" id="cDoctor" name="doctor_name" maxlength="150" placeholder="Doctor name">
+                        </div>
+                        <div class="form-group clm-health-only" style="display:none;">
+                            <label><i class="fas fa-calendar-plus"></i> Admission Date</label>
+                            <input type="date" id="cAdmissionDate" name="admission_date">
+                        </div>
+                        <div class="form-group clm-health-only" style="display:none;">
+                            <label><i class="fas fa-calendar-minus"></i> Discharge Date</label>
+                            <input type="date" id="cDischargeDate" name="discharge_date">
+                        </div>
+                        <div class="form-group form-full-width clm-health-only" style="display:none;">
+                            <label><i class="fas fa-notes-medical"></i> Diagnosis / Treatment Summary</label>
+                            <textarea id="cDiagnosis" name="diagnosis" rows="2" maxlength="2000" placeholder="Ailment, disease, or medical condition"></textarea>
+                        </div>
+
+                        <!-- Life Specific Fields -->
+                        <div class="form-section-title clm-life-only" style="display:none;"><i class="fas fa-user-shield"></i> Life Claim Details</div>
+                        <div class="form-group clm-life-only" style="display:none;">
+                            <label><i class="fas fa-file-invoice"></i> Life Claim Nature</label>
+                            <select id="cLifeType" name="life_claim_type" class="searchable">
+                                <?php foreach (CLM_LIFE_TYPES as $k => $v): ?><option value="<?php echo $k; ?>"><?php echo $v; ?></option><?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="form-group clm-life-only" style="display:none;">
+                            <label><i class="fas fa-calendar-day"></i> Date of Event</label>
+                            <input type="date" id="cDateOfEvent" name="date_of_event">
+                        </div>
+
                         <div class="form-group form-full-width">
                             <label><i class="fas fa-align-left"></i> Description</label>
                             <textarea id="cDesc" name="description" rows="3" maxlength="2000" placeholder="What happened"></textarea>
@@ -619,19 +736,19 @@ if (isset($_GET['action'])) {
 
                         <?php if ($isStaff): ?>
                         <div class="form-section-title"><i class="fas fa-clipboard-check"></i> Survey &amp; Settlement</div>
-                        <div class="form-group">
+                        <div class="form-group clm-motor-only">
                             <label><i class="fas fa-user-check"></i> Surveyor Name</label>
                             <input type="text" id="cSurveyor" name="surveyor_name" maxlength="150">
                         </div>
-                        <div class="form-group">
+                        <div class="form-group clm-motor-only">
                             <label><i class="fas fa-phone"></i> Surveyor Mobile</label>
                             <input type="tel" id="cSurveyorMob" name="surveyor_mobile" maxlength="15" inputmode="tel">
                         </div>
-                        <div class="form-group">
+                        <div class="form-group clm-motor-only">
                             <label><i class="fas fa-calendar-check"></i> Survey Date</label>
                             <input type="date" id="cSurveyDate" name="survey_date">
                         </div>
-                        <div class="form-group">
+                        <div class="form-group clm-motor-only">
                             <label><i class="fas fa-warehouse"></i> Garage</label>
                             <input type="text" id="cGarage" name="garage_name" maxlength="150">
                         </div>
@@ -684,14 +801,23 @@ if (isset($_GET['action'])) {
     <script>
         /** Developed by Rudees Digital */
         const IS_ADMIN = <?php echo $isAdmin ? 'true' : 'false'; ?>, IS_STAFF = <?php echo $isStaff ? 'true' : 'false'; ?>, IS_AGENT = <?php echo $isAgent ? 'true' : 'false'; ?>;
-        const CLM_TYPES = <?php echo json_encode(CLM_TYPES); ?>, CLM_STATUS = <?php echo json_encode(CLM_STATUS); ?>;
+        const CLM_CATEGORIES = <?php echo json_encode(CLM_CATEGORIES); ?>;
+        const CLM_TYPES = <?php echo json_encode(CLM_TYPES); ?>;
+        const CLM_HEALTH_TYPES = <?php echo json_encode(CLM_HEALTH_TYPES); ?>;
+        const CLM_LIFE_TYPES = <?php echo json_encode(CLM_LIFE_TYPES); ?>;
+        const CLM_STATUS = <?php echo json_encode(CLM_STATUS); ?>;
         const ST_CLS = { intimated: 'status-user', survey: 'status-pending', approved: 'status-admin', settled: 'status-active', rejected: 'status-cancelled', withdrawn: 'status-inactive' };
         const OPEN = ['intimated', 'survey', 'approved'];
         // chevrons: key, label, colour class
         const STAGES = [['', 'All', ''], ['intimated', 'Intimated', 'pipe-unread'], ['survey', 'Survey', 'pipe-unread'], ['approved', 'Approved', 'pipe-unread'], ['settled', 'Settled', 'pipe-read'], ['closed', 'Rejected/Withdrawn', 'pipe-read']];
         // doc types: value, label, icon
-        const DOC_TYPES = [['claim_form', 'Claim form', 'fa-file-signature'], ['fir', 'FIR', 'fa-file-shield'], ['estimate', 'Estimate', 'fa-file-invoice'], ['survey_report', 'Survey report', 'fa-clipboard-check'],
-            ['repair_invoice', 'Repair invoice', 'fa-file-invoice-dollar'], ['photo', 'Photo', 'fa-camera'], ['settlement_letter', 'Settlement letter', 'fa-envelope-open-text'], ['other', 'Other', 'fa-file']];
+        const DOC_TYPES = [
+            ['claim_form', 'Claim form', 'fa-file-signature'], ['fir', 'FIR', 'fa-file-shield'], ['estimate', 'Estimate', 'fa-file-invoice'], ['survey_report', 'Survey report', 'fa-clipboard-check'],
+            ['repair_invoice', 'Repair invoice', 'fa-file-invoice-dollar'], ['photo', 'Photo', 'fa-camera'],
+            ['hospital_bill', 'Hospital / Discharge Summary', 'fa-file-medical'], ['medical_report', 'Medical / Lab Report', 'fa-notes-medical'],
+            ['death_certificate', 'Death Certificate', 'fa-certificate'], ['nominee_kyc', 'Nominee KYC', 'fa-id-card'], ['policy_bond', 'Original Policy Document', 'fa-file-contract'],
+            ['settlement_letter', 'Settlement letter', 'fa-envelope-open-text'], ['other', 'Other', 'fa-file']
+        ];
         // staff quick moves: next statuses + button look
         const NEXT = { intimated: ['survey', 'approved', 'rejected'], survey: ['approved', 'rejected'], approved: ['settled', 'rejected'] };
         const QUICK = { survey: ['Move to Survey', 'fa-magnifying-glass', 'btn-secondary', 'cSurveyor'], approved: ['Approve', 'fa-circle-check', 'btn-success', 'cAmtApproved'],
@@ -725,7 +851,7 @@ if (isset($_GET['action'])) {
                 else if (act === 'delete' && IS_ADMIN) deleteClaim(id);
             });
             $('#claimPipe').on('click', '.pipeline-stage', function() { setStage(String($(this).data('stage') || '')); });
-            $('#filterType, #filterInsurer, #filterAgent, #filterDateFrom, #filterDateTo').on('change', applyFilters);
+            $('#filterCategory, #filterType, #filterInsurer, #filterAgent, #filterDateFrom, #filterDateTo').on('change', applyFilters);
             $('#claimSearch').on('input', function() {
                 clearTimeout(this._t);
                 var v = this.value;
@@ -759,7 +885,16 @@ if (isset($_GET['action'])) {
                 policyOpts = res.data;
                 var el = document.getElementById('cPolicy');
                 el.innerHTML = '<option value="">Select Policy</option>' + policyOpts.map(function(p) {
-                    return '<option value="' + (+p.id) + '">' + escapeHtml(p.policy_number + ' · ' + p.vehicle_number + ' · ' + p.customer_name) + '</option>';
+                    var cat = (p.insurance_category || 'motor').toLowerCase();
+                    var label = p.policy_number;
+                    if (cat === 'health') {
+                        label += ' · ' + (p.plan_name || 'Health Plan') + ' · ' + p.customer_name;
+                    } else if (cat === 'life') {
+                        label += ' · Life ' + (p.sum_assured ? money(p.sum_assured) : '') + ' · ' + p.customer_name;
+                    } else {
+                        label += ' · ' + (p.vehicle_number || '-') + ' · ' + p.customer_name;
+                    }
+                    return '<option value="' + (+p.id) + '">' + escapeHtml(label) + '</option>';
                 }).join('');
                 if (el.sdRefresh) el.sdRefresh();
                 if (window.claimsImport && policyOpts[0]) claimsImport.demoPolicy(policyOpts[0].policy_number);
@@ -808,11 +943,42 @@ if (isset($_GET['action'])) {
             var cols = [];
             if (IS_ADMIN) cols.push({ data: 'id', title: '', className: 'bulk-col', orderable: false, searchable: false });
             cols.push(
+                {
+                    data: 'claim_category', title: 'Vertical',
+                    render: function(d, t, r) {
+                        var cat = (d || r.insurance_category || 'motor').toLowerCase();
+                        var lbl = cat === 'health' ? 'Health' : (cat === 'life' ? 'Life' : 'Motor');
+                        var chip = cat === 'health' ? 'chip-emerald' : (cat === 'life' ? 'chip-purple' : 'chip-blue');
+                        var ico = cat === 'health' ? 'fa-heart-pulse' : (cat === 'life' ? 'fa-user-shield' : 'fa-car');
+                        if (t !== 'display') return lbl;
+                        return '<span class="status-badge ' + chip + '"><i class="fas ' + ico + '"></i> ' + lbl + '</span>';
+                    }
+                },
                 { data: 'claim_number', title: 'Claim No', responsivePriority: 0, render: function(d, t) { return t === 'display' ? '<strong>' + escapeHtml(d) + '</strong>' : d; } },
                 { data: 'policy_number', title: 'Policy No', responsivePriority: 3 },
                 { data: 'customer_name', title: 'Customer', responsivePriority: 2 },
-                { data: 'vehicle_number', title: 'Vehicle', responsivePriority: 8 },
-                { data: 'claim_type', title: 'Type', responsivePriority: 7, render: function(d) { return escapeHtml(CLM_TYPES[d] || d); } },
+                {
+                    data: 'vehicle_number', title: 'Vehicle / Plan', responsivePriority: 8,
+                    render: function(d, t, r) {
+                        var cat = (r.claim_category || r.insurance_category || 'motor').toLowerCase();
+                        if (cat === 'health') {
+                            return '<span class="badge-code" title="Cover: ' + (r.sum_insured ? money(r.sum_insured) : '-') + '"><i class="fas fa-heart-pulse"></i> ' + escapeHtml(r.plan_name || 'Health Plan') + '</span>';
+                        } else if (cat === 'life') {
+                            return '<span class="badge-code" title="Sum Assured: ' + (r.sum_assured ? money(r.sum_assured) : '-') + '"><i class="fas fa-user-shield"></i> ' + escapeHtml(r.life_plan_type ? r.life_plan_type.toUpperCase() : 'Life Plan') + '</span>';
+                        }
+                        return d ? escapeHtml(d) : '-';
+                    }
+                },
+                {
+                    data: 'claim_type', title: 'Type', responsivePriority: 7,
+                    render: function(d, t, r) {
+                        var cat = (r.claim_category || r.insurance_category || 'motor').toLowerCase();
+                        var lbl = cat === 'health' ? (CLM_HEALTH_TYPES[d] || d)
+                                : (cat === 'life' ? (CLM_LIFE_TYPES[r.life_claim_type || d] || d)
+                                : (CLM_TYPES[d] || d));
+                        return escapeHtml(lbl);
+                    }
+                },
                 { data: 'intimation_date', title: 'Intimated', responsivePriority: 4 },
                 { data: 'amount_claimed', title: 'Claimed', responsivePriority: 5, render: function(d) { return escapeHtml(money(d)); } },
                 { data: 'amount_approved', title: 'Approved / Settled', responsivePriority: 6, render: function(d, t, r) { return escapeHtml(money(d) + ' / ' + money(r.amount_settled)); } },
@@ -860,7 +1026,8 @@ if (isset($_GET['action'])) {
         // header filters -> row-data predicates (status lives in the chevrons)
         function applyFilters() {
             if (!claimsTable) return;
-            var ty = $('#filterType').val(), ins = $('#filterInsurer').val(), ag = $('#filterAgent').val(), f = $('#filterDateFrom').val(), t = $('#filterDateTo').val();
+            var cat = $('#filterCategory').val(), ty = $('#filterType').val(), ins = $('#filterInsurer').val(), ag = $('#filterAgent').val(), f = $('#filterDateFrom').val(), t = $('#filterDateTo').val();
+            rsTbWhere(claimsTable, 'category', cat ? function(r) { return (r.claim_category || r.insurance_category || 'motor') === cat; } : null);
             rsTbWhere(claimsTable, 'type', ty ? function(r) { return r.claim_type === ty; } : null);
             rsTbWhere(claimsTable, 'insurer', ins ? function(r) { return r.company_name === ins; } : null);
             rsTbWhere(claimsTable, 'agent', ag ? function(r) { return r.agent_name === ag; } : null);
@@ -892,7 +1059,7 @@ if (isset($_GET['action'])) {
         }
 
         function clearFilters() {
-            ['filterType', 'filterInsurer', 'filterAgent'].forEach(function(id) { var el = document.getElementById(id); if (el) { el.value = ''; if (el.sdSetVal) el.sdSetVal(''); } });
+            ['filterCategory', 'filterType', 'filterInsurer', 'filterAgent'].forEach(function(id) { var el = document.getElementById(id); if (el) { el.value = ''; if (el.sdSetVal) el.sdSetVal(''); } });
             $('#filterDateFrom, #filterDateTo, #claimSearch').val('');
             $('.hf-seg button').removeClass('is-on');
             curStage = ''; pinPolicy = null;
@@ -919,16 +1086,54 @@ if (isset($_GET['action'])) {
         function refreshSelects() { $('#claimForm select.searchable').each(function() { if (this.sdRefresh) this.sdRefresh(); }); }
 
         function policyInfo() {
-            var p = polById($('#cPolicy').val());
-            $('#cPolicyInfo').html(p ? '<i class="fas fa-building-shield"></i> ' + escapeHtml(p.company_name) + ' · ' + escapeHtml(rsPaperDate(p.policy_start_date)) + ' – ' + escapeHtml(rsPaperDate(p.policy_end_date))
-                + (p.idv > 0 ? ' · IDV ' + escapeHtml(money(p.idv)) : '') : '').toggle(!!p);
+            var pid = $('#cPolicy').val();
+            var p = polById(pid);
+            if (!p) {
+                $('#cPolicyInfo').hide();
+                $('.clm-health-only, .clm-life-only').hide();
+                $('.clm-motor-only').show();
+                updateTypeOptions('motor');
+                return;
+            }
+            var cat = (p.insurance_category || 'motor').toLowerCase();
+            var catBadge = cat === 'health' ? '<span class="status-badge chip-emerald"><i class="fas fa-heart-pulse"></i> Health</span>'
+                         : (cat === 'life' ? '<span class="status-badge chip-purple"><i class="fas fa-user-shield"></i> Life</span>'
+                         : '<span class="status-badge chip-blue"><i class="fas fa-car"></i> Motor</span>');
+            var coverInfo = '';
+            if (cat === 'health' && p.sum_insured > 0) coverInfo = ' · Sum Insured ' + escapeHtml(money(p.sum_insured)) + (p.plan_name ? ' (' + escapeHtml(p.plan_name) + ')' : '');
+            else if (cat === 'life' && p.sum_assured > 0) coverInfo = ' · Sum Assured ' + escapeHtml(money(p.sum_assured));
+            else if (p.idv > 0) coverInfo = ' · IDV ' + escapeHtml(money(p.idv));
+
+            $('#cPolicyInfo').html(catBadge + ' · <i class="fas fa-building-shield"></i> ' + escapeHtml(p.company_name) + ' · ' + escapeHtml(rsPaperDate(p.policy_start_date)) + ' – ' + escapeHtml(rsPaperDate(p.policy_end_date)) + coverInfo).show();
+
+            // Toggle category fields
+            $('.clm-motor-only').toggle(cat === 'motor');
+            $('.clm-health-only').toggle(cat === 'health');
+            $('.clm-life-only').toggle(cat === 'life');
+
+            updateTypeOptions(cat, $('#cType').val());
+            refreshSelects();
         }
+
+        function updateTypeOptions(cat, selectedVal) {
+            var types = cat === 'health' ? CLM_HEALTH_TYPES : (cat === 'life' ? CLM_LIFE_TYPES : CLM_TYPES);
+            var $t = $('#cType');
+            var cur = selectedVal || $t.val();
+            $t.empty();
+            Object.keys(types).forEach(function(k) {
+                $t.append($('<option>').val(k).text(types[k]));
+            });
+            if (cur && types[cur]) $t.val(cur);
+            else $t.val(Object.keys(types)[0]);
+            var el = document.getElementById('cType');
+            if (el && el.sdRefresh) el.sdRefresh();
+        }
+
         // FIR only for theft / third party, reason only when rejected
         function toggles() {
             var ty = $('#cType').val(), fir = ty === 'theft' || ty === 'third_party', rej = $('#cStatus').val() === 'rejected';
             $('#cFirGroup').prop('hidden', !fir).find('input').prop('disabled', !fir);
             $('#cRejectGroup').prop('hidden', !rej).find('input').prop('disabled', !rej);
-            policyInfo();
         }
         // agent edit: policy, intimation date + insurer ref stay as saved
         function lockAgent(on) {
@@ -957,7 +1162,8 @@ if (isset($_GET['action'])) {
                 $('#cPolicy').val(policyOpts.some(function(p) { return +p.id === +pid; }) ? pid : '');
                 if (!$('#cPolicy').val()) Swal.fire({ icon: 'warning', title: 'Policy not available', text: 'That policy is cancelled or not on your book.' });
             }
-            openForm('<i class="fas fa-car-burst"></i> Add Claim');
+            policyInfo();
+            openForm('<i class="fas fa-shield-halved"></i> Add Claim');
         }
 
         function editClaim(id, st) {
@@ -968,8 +1174,10 @@ if (isset($_GET['action'])) {
             f.reset();
             $('#cPolicy option[data-tmp]').remove();
             if (!policyOpts.some(function(p) { return +p.id === c.policy_entry_id; })) // cancelled since -> keep it pickable for this edit
-                $('#cPolicy').append($('<option data-tmp="1">').val(c.policy_entry_id).text(c.policy_number + ' · ' + c.vehicle_number + ' · ' + c.customer_name));
+                $('#cPolicy').append($('<option data-tmp="1">').val(c.policy_entry_id).text(c.policy_number + ' · ' + (c.vehicle_number || c.plan_name || 'Policy') + ' · ' + c.customer_name));
             $(f).find('[name]').each(function() { if (this.name in c) $(this).val(c[this.name] == null ? '' : c[this.name]); });
+            policyInfo();
+            if (c.claim_type) $('#cType').val(c.claim_type);
             if (st) {
                 $('#cStatus').val(st);
                 if (st === 'survey' && !$('#cSurveyDate').val()) $('#cSurveyDate').val(ymd(new Date()));
@@ -1033,33 +1241,72 @@ if (isset($_GET['action'])) {
             var c = byId(id);
             if (!c) return;
             var e = function(v) { return v == null || v === '' ? '-' : escapeHtml(v); };
+            var cat = (c.claim_category || c.insurance_category || 'motor').toLowerCase();
+            var catBadge = cat === 'health' ? '<span class="status-badge chip-emerald"><i class="fas fa-heart-pulse"></i> Health Insurance</span>'
+                         : (cat === 'life' ? '<span class="status-badge chip-purple"><i class="fas fa-user-shield"></i> Life Insurance</span>'
+                         : '<span class="status-badge chip-blue"><i class="fas fa-car"></i> Motor Insurance</span>');
+            var typeLbl = cat === 'health' ? (CLM_HEALTH_TYPES[c.claim_type] || c.claim_type)
+                        : (cat === 'life' ? (CLM_LIFE_TYPES[c.life_claim_type || c.claim_type] || c.claim_type)
+                        : (CLM_TYPES[c.claim_type] || c.claim_type));
+
             var main = [
                 ['fa-hashtag', 'Claim Number', '<strong>' + e(c.claim_number) + '</strong>'], ['fa-flag', 'Status', pill(c.status)],
-                ['fa-file-contract', 'Policy', '<a href="policy_entries.php?id=' + (+c.policy_entry_id) + '">' + e(c.policy_number) + '</a>'], ['fa-building-shield', 'Insurer', e(c.company_name)],
-                ['fa-user', 'Customer', e(c.customer_name) + (c.customer_mobile ? ' · ' + e(c.customer_mobile) : '')], ['fa-car', 'Vehicle', e(c.vehicle_number) + (c.vehicle_type ? ' · ' + e(c.vehicle_type) : '')],
-                ['fa-car-burst', 'Claim Type', e(CLM_TYPES[c.claim_type] || c.claim_type)], ['fa-money-bill-wave', 'Amount Claimed', '<strong>' + e(money(c.amount_claimed)) + '</strong>'],
-                ['fa-calendar-xmark', 'Incident Date', e(c.incident_date)], ['fa-bullhorn', 'Intimation Date', e(c.intimation_date)],
-                // empty extras skipped — the summary panel shows real facts only
-                c.incident_place && ['fa-location-dot', 'Incident Place', e(c.incident_place)], c.fir_number && ['fa-file-shield', 'FIR No', e(c.fir_number)],
-                c.insurer_claim_number && ['fa-receipt', 'Insurer Claim No', e(c.insurer_claim_number)],
-                c.amount_approved != null && ['fa-circle-check', 'Amount Approved', e(money(c.amount_approved))],
-                c.amount_settled != null && ['fa-hand-holding-dollar', 'Amount Settled', e(money(c.amount_settled))], c.settlement_date && ['fa-calendar-day', 'Settlement Date', e(c.settlement_date)],
-                c.description && ['fa-align-left', 'Description', e(c.description)]
-            ].filter(Boolean);
-            var survey = [
-                ['fa-user-check', 'Surveyor', e(c.surveyor_name)], ['fa-phone', 'Surveyor Mobile', e(c.surveyor_mobile)],
-                ['fa-calendar-check', 'Survey Date', e(c.survey_date)], ['fa-warehouse', 'Garage', e(c.garage_name)],
-                ['fa-route', 'Settlement Mode', e(c.settlement_mode ? c.settlement_mode.charAt(0).toUpperCase() + c.settlement_mode.slice(1) : '')], ['fa-user-tie', 'Agent', e(c.agent_name || 'Direct')]
-            ].concat(c.status === 'rejected' ? [['fa-ban', 'Rejection Reason', e(c.rejection_reason)]] : [], [
+                ['fa-layer-group', 'Vertical', catBadge], ['fa-file-contract', 'Policy', '<a href="policy_entries.php?id=' + (+c.policy_entry_id) + '">' + e(c.policy_number) + '</a>'],
+                ['fa-building-shield', 'Insurer', e(c.company_name)], ['fa-user', 'Customer', e(c.customer_name) + (c.customer_mobile ? ' · ' + e(c.customer_mobile) : '')]
+            ];
+
+            if (cat === 'health') {
+                main.push(['fa-file-medical', 'Health Plan', e(c.plan_name || 'Health Plan') + (c.sum_insured ? ' · Cover: ' + e(money(c.sum_insured)) : '')]);
+            } else if (cat === 'life') {
+                main.push(['fa-user-shield', 'Life Cover', (c.sum_assured ? 'Sum Assured: ' + e(money(c.sum_assured)) : 'Life Plan')]);
+            } else {
+                main.push(['fa-car', 'Vehicle', e(c.vehicle_number) + (c.vehicle_type ? ' · ' + e(c.vehicle_type) : '')]);
+            }
+
+            main.push(['fa-tag', 'Claim Type', '<strong>' + e(typeLbl) + '</strong>']);
+            main.push(['fa-money-bill-wave', 'Amount Claimed', '<strong class="wallet-amount wallet-positive">' + e(money(c.amount_claimed)) + '</strong>']);
+            main.push(['fa-calendar-xmark', 'Incident / Event Date', e(c.incident_date)]);
+            main.push(['fa-bullhorn', 'Intimation Date', e(c.intimation_date)]);
+
+            if (c.incident_place) main.push(['fa-location-dot', 'Incident Place', e(c.incident_place)]);
+            if (c.fir_number) main.push(['fa-file-shield', 'FIR No', e(c.fir_number)]);
+            if (c.insurer_claim_number) main.push(['fa-receipt', 'Insurer Claim No', e(c.insurer_claim_number)]);
+            if (c.amount_approved != null) main.push(['fa-circle-check', 'Amount Approved', e(money(c.amount_approved))]);
+            if (c.amount_settled != null) main.push(['fa-hand-holding-dollar', 'Amount Settled', e(money(c.amount_settled))]);
+            if (c.settlement_date) main.push(['fa-calendar-day', 'Settlement Date', e(c.settlement_date)]);
+            if (c.description) main.push(['fa-align-left', 'Description', e(c.description)]);
+
+            var specificRows = [];
+            if (cat === 'health') {
+                if (c.hospital_name) specificRows.push(['fa-hospital', 'Hospital Name', e(c.hospital_name)]);
+                if (c.doctor_name) specificRows.push(['fa-user-doctor', 'Treating Doctor', e(c.doctor_name)]);
+                if (c.admission_date) specificRows.push(['fa-calendar-plus', 'Admission Date', e(c.admission_date)]);
+                if (c.discharge_date) specificRows.push(['fa-calendar-minus', 'Discharge Date', e(c.discharge_date)]);
+                if (c.diagnosis) specificRows.push(['fa-notes-medical', 'Diagnosis', e(c.diagnosis)]);
+            } else if (cat === 'life') {
+                if (c.life_claim_type) specificRows.push(['fa-file-invoice', 'Claim Nature', e(CLM_LIFE_TYPES[c.life_claim_type] || c.life_claim_type)]);
+                if (c.date_of_event) specificRows.push(['fa-calendar-day', 'Date of Event', e(c.date_of_event)]);
+            } else {
+                if (c.surveyor_name) specificRows.push(['fa-user-check', 'Surveyor', e(c.surveyor_name)]);
+                if (c.surveyor_mobile) specificRows.push(['fa-phone', 'Surveyor Mobile', e(c.surveyor_mobile)]);
+                if (c.survey_date) specificRows.push(['fa-calendar-check', 'Survey Date', e(c.survey_date)]);
+                if (c.garage_name) specificRows.push(['fa-warehouse', 'Garage', e(c.garage_name)]);
+            }
+
+            var survey = specificRows.concat([
+                ['fa-route', 'Settlement Mode', e(c.settlement_mode ? c.settlement_mode.charAt(0).toUpperCase() + c.settlement_mode.slice(1) : '')],
+                ['fa-user-tie', 'Agent', e(c.agent_name || 'Direct Customer')]
+            ]).concat(c.status === 'rejected' ? [['fa-ban', 'Rejection Reason', e(c.rejection_reason)]] : [], [
                 ['fa-comment-dots', 'Remarks', e(c.remarks)],
-                ['fa-user-pen', 'Created', e(c.created_by_name) + ' · ' + e(c.created_at)], ['fa-clock-rotate-left', 'Last Updated', c.updated_at ? e(c.updated_by_name || '') + ' · ' + e(c.updated_at) : '-']
+                ['fa-user-pen', 'Created', e(c.created_by_name) + ' · ' + e(c.created_at)],
+                ['fa-clock-rotate-left', 'Last Updated', c.updated_at ? e(c.updated_by_name || '') + ' · ' + e(c.updated_at) : '-']
             ]);
 
             var html = '<div class="tab-nav">'
                 + '<button type="button" class="tab-btn" data-tab="details"><i class="fas fa-list"></i> Details</button>'
                 + '<button type="button" class="tab-btn" data-tab="docs"><i class="fas fa-folder-open"></i> Documents</button></div>'
                 + '<div class="tab-content" data-tab="details">' + kv(main)
-                + '<div class="form-section-title"><i class="fas fa-clipboard-check"></i> Survey &amp; Settlement</div>' + kv(survey) + '</div>'
+                + '<div class="form-section-title"><i class="fas fa-clipboard-check"></i> ' + (cat === 'health' ? 'Hospital &amp; Settlement' : (cat === 'life' ? 'Claim &amp; Settlement' : 'Survey &amp; Settlement')) + '</div>' + kv(survey) + '</div>'
                 + '<div class="tab-content" data-tab="docs"><div class="doc-panel">'
                 + '<div class="doc-head"><span><i class="fas fa-folder-open"></i> Files on this claim</span><em id="docsCount"></em></div>'
                 + '<div id="docsList"><div class="doc-empty"><i class="fas fa-spinner fa-spin"></i><div><b>Loading documents…</b></div></div></div>'
@@ -1142,23 +1389,56 @@ if (isset($_GET['action'])) {
         function printClaim(id, kind) {
             var c = byId(id);
             if (!c) return;
+            var cat = (c.claim_category || c.insurance_category || 'motor').toLowerCase();
+            var catLabel = cat === 'health' ? 'Health Insurance' : (cat === 'life' ? 'Life Insurance' : 'Motor Insurance');
+            var typeLbl = cat === 'health' ? (CLM_HEALTH_TYPES[c.claim_type] || c.claim_type)
+                        : (cat === 'life' ? (CLM_LIFE_TYPES[c.life_claim_type || c.claim_type] || c.claim_type)
+                        : (CLM_TYPES[c.claim_type] || c.claim_type));
+
+            var partyLines = [];
+            if (cat === 'health') {
+                partyLines.push(c.plan_name || 'Health Policy');
+                if (c.sum_insured) partyLines.push('Sum Insured: ' + rsMoney(c.sum_insured));
+            } else if (cat === 'life') {
+                partyLines.push('Life Insurance');
+                if (c.sum_assured) partyLines.push('Sum Assured: ' + rsMoney(c.sum_assured));
+            } else {
+                partyLines.push((c.vehicle_number || '-') + (c.vehicle_type ? ' · ' + c.vehicle_type : ''));
+            }
+            if (c.customer_mobile) partyLines.push('Mobile: ' + c.customer_mobile);
+
             var rows = [
+                { k: 'Vertical', v: catLabel },
                 { k: 'Policy', v: c.policy_number + ' · ' + rsPaperDate(c.policy_start_date) + ' to ' + rsPaperDate(c.policy_end_date) },
                 { k: 'Insurer', v: c.company_name + (c.insurer_claim_number ? ' · claim ' + c.insurer_claim_number : '') },
-                { k: 'Claim type', v: CLM_TYPES[c.claim_type] || c.claim_type },
-                { k: 'Incident', v: rsPaperDate(c.incident_date) + (c.incident_place ? ' · ' + c.incident_place : '') },
-                c.fir_number && { k: 'FIR no', v: c.fir_number },
-                { k: 'Surveyor', v: [c.surveyor_name, c.surveyor_mobile].filter(Boolean).join(' · ') || '-' },
-                { k: 'Survey date', v: rsPaperDate(c.survey_date) || '-' },
-                { k: 'Garage', v: c.garage_name || '-' },
-                { k: 'Settlement', v: [c.settlement_mode ? c.settlement_mode.charAt(0).toUpperCase() + c.settlement_mode.slice(1) : '', rsPaperDate(c.settlement_date)].filter(Boolean).join(' · ') || '-' },
-                c.status === 'rejected' && { k: 'Rejection reason', v: c.rejection_reason },
-                c.remarks && { k: 'Remarks', v: c.remarks }
-            ].filter(Boolean);
+                { k: 'Claim type', v: typeLbl },
+                { k: 'Incident / Event', v: rsPaperDate(c.incident_date) + (c.incident_place ? ' · ' + c.incident_place : '') }
+            ];
+
+            if (cat === 'health') {
+                if (c.hospital_name) rows.push({ k: 'Hospital', v: c.hospital_name });
+                if (c.doctor_name) rows.push({ k: 'Doctor', v: c.doctor_name });
+                if (c.admission_date) rows.push({ k: 'Admission Date', v: rsPaperDate(c.admission_date) });
+                if (c.discharge_date) rows.push({ k: 'Discharge Date', v: rsPaperDate(c.discharge_date) });
+                if (c.diagnosis) rows.push({ k: 'Diagnosis', v: c.diagnosis });
+            } else if (cat === 'life') {
+                if (c.life_claim_type) rows.push({ k: 'Claim Nature', v: CLM_LIFE_TYPES[c.life_claim_type] || c.life_claim_type });
+                if (c.date_of_event) rows.push({ k: 'Date of Event', v: rsPaperDate(c.date_of_event) });
+            } else {
+                c.fir_number && rows.push({ k: 'FIR no', v: c.fir_number });
+                rows.push({ k: 'Surveyor', v: [c.surveyor_name, c.surveyor_mobile].filter(Boolean).join(' · ') || '-' });
+                rows.push({ k: 'Survey date', v: rsPaperDate(c.survey_date) || '-' });
+                rows.push({ k: 'Garage', v: c.garage_name || '-' });
+            }
+
+            rows.push({ k: 'Settlement', v: [c.settlement_mode ? c.settlement_mode.charAt(0).toUpperCase() + c.settlement_mode.slice(1) : '', rsPaperDate(c.settlement_date)].filter(Boolean).join(' · ') || '-' });
+            if (c.status === 'rejected') rows.push({ k: 'Rejection reason', v: c.rejection_reason });
+            if (c.remarks) rows.push({ k: 'Remarks', v: c.remarks });
+
             rsReportExport(kind || 'print', {
                 title: 'Claim Summary', number: c.claim_number,
-                party: { label: 'Insured', name: c.customer_name, lines: [c.vehicle_number + (c.vehicle_type ? ' · ' + c.vehicle_type : ''), c.customer_mobile ? 'Mobile: ' + c.customer_mobile : ''].filter(Boolean) },
-                info: [['Intimated', rsPaperDate(c.intimation_date)], ['Incident', rsPaperDate(c.incident_date)], ['Agent', c.agent_name || 'Direct'], ['Status', String(CLM_STATUS[c.status] || c.status).toUpperCase()]],
+                party: { label: 'Insured', name: c.customer_name, lines: partyLines },
+                info: [['Intimated', rsPaperDate(c.intimation_date)], ['Incident / Event', rsPaperDate(c.incident_date)], ['Agent', c.agent_name || 'Direct Customer'], ['Status', String(CLM_STATUS[c.status] || c.status).toUpperCase()]],
                 cols: [{ title: '#', field: '#', align: 'center' }, { title: 'Particulars', field: 'k', bold: true }, { title: 'Details', get: function(r) { return r.v || ''; } }],
                 rows: rows,
                 totals: [['Amount claimed', rsMoney(c.amount_claimed)], ['Amount approved', c.amount_approved == null ? '-' : rsMoney(c.amount_approved)], ['AMOUNT SETTLED', c.amount_settled == null ? '-' : rsMoney(c.amount_settled)]],
