@@ -24,7 +24,7 @@ $isAdmin = ($role === 'admin');
 $isManager = ($role === 'manager');
 $isAgent = ($role === 'agent');
 $isCustomer = ($role === 'customer');
-$canCreate = ($isAdmin || $isManager || $isAgent);
+$canCreate = $isAgent; // Only agents can create/add new policies; Admin views and manages
 $canEdit = ($isAdmin || $isAgent);
 $canDelete = $isAdmin;
 
@@ -591,7 +591,7 @@ if (isset($_GET['action'])) {
                 }
                 if (!validateCSRFToken($_POST['csrf_token'] ?? '')) { echo json_encode(['success'=>false,'message'=>'Invalid request']); exit; }
                 if (!$canCreate) {
-                    echo json_encode(['success' => false, 'message' => 'Access denied']);
+                    echo json_encode(['success' => false, 'message' => 'Access denied: Only agents are allowed to create new policies']);
                     exit();
                 }
 
@@ -1287,7 +1287,7 @@ if (isset($_GET['action'])) {
 
             case 'addEndorsement':
                 if ($_SERVER['REQUEST_METHOD'] !== 'POST' || !validateCSRFToken($_POST['csrf_token'] ?? '')) { echo json_encode(['success' => false, 'message' => 'Invalid request']); exit(); }
-                if (!$canCreate) { echo json_encode(['success' => false, 'message' => 'Access denied']); exit(); }
+                if (!$canEdit) { echo json_encode(['success' => false, 'message' => 'Access denied']); exit(); }
                 $pid = (int)($_POST['policy_id'] ?? 0);
                 $pol = policyRows($conn, "SELECT id, policy_number, branch_id, policy_start_date, policy_end_date, status FROM policy_entries WHERE id = ?", $pid)[0] ?? null;
                 $eType = $_POST['endorsement_type'] ?? '';
@@ -1458,7 +1458,7 @@ if (isset($_GET['action'])) {
                     exit();
                 }
                 if (!validateCSRFToken($_POST['csrf_token'] ?? '')) { echo json_encode(['success'=>false,'message'=>'Invalid request']); exit; }
-                if (!$canCreate) {
+                if (!$canEdit) {
                     echo json_encode(['success' => false, 'message' => 'Access denied']);
                     exit();
                 }
@@ -1542,7 +1542,7 @@ if (isset($_GET['action'])) {
                 }
                 if (!validateCSRFToken($_POST['csrf_token'] ?? '')) { echo json_encode(['success'=>false,'message'=>'Invalid request']); exit; }
                 if (!$canCreate) {
-                    echo json_encode(['success' => false, 'message' => 'Access denied']);
+                    echo json_encode(['success' => false, 'message' => 'Access denied: Only agents are allowed to upload policies']);
                     exit();
                 }
 
@@ -2186,7 +2186,7 @@ if ($isAdmin) {
         </div>
     </div>
 
-    <?php if ($canCreate): ?>
+    <?php if ($canCreate || $canEdit): ?>
     <!-- Add/Edit Policy Modal -->
     <div class="modal-overlay" id="policyModal">
         <div class="modal modal-wide" onclick="event.stopPropagation()">
@@ -2818,7 +2818,7 @@ if ($isAdmin) {
         }
 
         // modal dropdowns
-        if (CAN_CREATE) {
+        if (CAN_CREATE || CAN_EDIT) {
             // branches
             var sel = $('#fBranch');
             sel.find('option:not(:first)').remove();
@@ -3205,7 +3205,7 @@ if ($isAdmin) {
         $('#fAgentCommAmt').val(amt.toFixed(2));
     }
 
-    <?php if ($canCreate): ?>
+    <?php if ($canCreate || $canEdit): ?>
 
     // vehicle change -> auto-fill customer + fields
     $(document).on('change', '#fVehicle', function() {
@@ -3392,6 +3392,10 @@ if ($isAdmin) {
     }
 
     function openAddModal() {
+        if (!CAN_CREATE) {
+            Swal.fire({ icon: 'warning', title: 'Restricted', text: 'Only agents are allowed to create new policies.' });
+            return;
+        }
         isEditMode = false;
         $('#modalTitle').html('<i class="fas fa-plus-circle"></i> Add Policy');
         $('#policyForm')[0].reset();
