@@ -149,8 +149,8 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $conn = getDBConnection();
                 $user = null;
 
-                // 1. Direct match on users table by email or phone (using guaranteed core columns)
-                $stmt = $conn->prepare("SELECT id, name, email, phone, password_hash, role, is_active, status, profile_setup_completed FROM users WHERE email = ? OR (phone IS NOT NULL AND phone != '' AND phone = ?) LIMIT 1");
+                // 1. Direct match on users table by email or phone (SELECT * guarantees compatibility across schema versions)
+                $stmt = $conn->prepare("SELECT * FROM users WHERE email = ? OR (phone IS NOT NULL AND phone != '' AND phone = ?) LIMIT 1");
                 if ($stmt) {
                     $stmt->bind_param("ss", $loginInput, $loginInput);
                     $stmt->execute();
@@ -163,40 +163,40 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
                 // 2. If not found by email/phone, check if loginInput matches an agent code or mobile in agents table
                 if (!$user) {
-                    $stmt = $conn->prepare("SELECT u.id, u.name, u.email, u.phone, u.password_hash, u.role, u.is_active, u.status, u.profile_setup_completed 
-                                            FROM agents a 
-                                            JOIN users u ON u.id = a.user_id 
-                                            WHERE a.agent_code = ? OR a.mobile = ? 
-                                            LIMIT 1");
-                    if ($stmt) {
-                        $stmt->bind_param("ss", $loginInput, $loginInput);
-                        $stmt->execute();
-                        $res = $stmt->get_result();
-                        if ($res && $res->num_rows === 1) {
-                            $user = $res->fetch_assoc();
+                    try {
+                        $stmt = $conn->prepare("SELECT u.* FROM agents a JOIN users u ON u.id = a.user_id WHERE a.agent_code = ? OR a.mobile = ? LIMIT 1");
+                        if ($stmt) {
+                            $stmt->bind_param("ss", $loginInput, $loginInput);
+                            $stmt->execute();
+                            $res = $stmt->get_result();
+                            if ($res && $res->num_rows === 1) {
+                                $user = $res->fetch_assoc();
+                            }
+                            $stmt->close();
                         }
-                        $stmt->close();
-                    }
+                    } catch (Throwable $eAgent) {}
                 }
 
                 // 3. Fallback: match clean digits against user phone
                 $cleanDigits = preg_replace('/[^0-9]/', '', $loginInput);
                 if (!$user && strlen($cleanDigits) >= 10) {
-                    $stmt = $conn->prepare("SELECT id, name, email, phone, password_hash, role, is_active, status, profile_setup_completed FROM users WHERE REPLACE(REPLACE(phone, ' ', ''), '-', '') LIKE CONCAT('%', ?) LIMIT 1");
-                    if ($stmt) {
-                        $stmt->bind_param("s", $cleanDigits);
-                        $stmt->execute();
-                        $res = $stmt->get_result();
-                        if ($res && $res->num_rows === 1) {
-                            $user = $res->fetch_assoc();
+                    try {
+                        $stmt = $conn->prepare("SELECT * FROM users WHERE REPLACE(REPLACE(phone, ' ', ''), '-', '') LIKE CONCAT('%', ?) LIMIT 1");
+                        if ($stmt) {
+                            $stmt->bind_param("s", $cleanDigits);
+                            $stmt->execute();
+                            $res = $stmt->get_result();
+                            if ($res && $res->num_rows === 1) {
+                                $user = $res->fetch_assoc();
+                            }
+                            $stmt->close();
                         }
-                        $stmt->close();
-                    }
+                    } catch (Throwable $eDigits) {}
                 }
 
                 if ($user) {
-                    $uStatus = $user['status'] ?? ($user['is_active'] ? 'active' : 'suspended');
-                    if (!$user['is_active'] || $uStatus === 'blocked') {
+                    $uStatus = $user['status'] ?? (!empty($user['is_active']) ? 'active' : 'suspended');
+                    if (empty($user['is_active']) || $uStatus === 'blocked') {
                         $error = 'Your account has been blocked or deactivated. Contact administrator.';
                     } elseif ($uStatus === 'suspended') {
                         $error = 'Your account is currently suspended. Please contact support.';
@@ -210,51 +210,63 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         $_SESSION['email'] = $user['email'];
                         $_SESSION['role'] = $user['role'];
                         $_SESSION['status'] = $uStatus;
-                        $_SESSION['customer_id'] = null;
+                        $_SESSION['customer_id'] = $user['customer_id'] ?? null;
                         $_SESSION['LAST_ACTIVITY'] = time();
 
                         $targetUrl = 'dashboard.php';
 
                         if ($user['role'] === 'customer') {
-                            $cSt = $conn->prepare("SELECT id FROM customers WHERE email = ? OR (mobile IS NOT NULL AND mobile != '' AND mobile = ?) LIMIT 1");
-                            if ($cSt) {
-                                $cSt->bind_param("ss", $user['email'], $user['phone']);
-                                $cSt->execute();
-                                $cRes = $cSt->get_result();
-                                if ($cRes && $cRow = $cRes->fetch_assoc()) {
-                                    $_SESSION['customer_id'] = (int)$cRow['id'];
+                            try {
+                                $cSt = $conn->prepare("SELECT id FROM customers WHERE email = ? OR (mobile IS NOT NULL AND mobile != '' AND mobile = ?) LIMIT 1");
+                                if ($cSt) {
+                                    $cSt->bind_param("ss", $user['email'], $user['phone']);
+                                    $cSt->execute();
+                                    $cRes = $cSt->get_result();
+                                    if ($cRes && $cRow = $cRes->fetch_assoc()) {
+                                        $_SESSION['customer_id'] = (int)$cRow['id'];
+                                    }
+                                    $cSt->close();
                                 }
-                                $cSt->close();
-                            }
+                            } catch (Throwable $ce) {}
                         } elseif ($user['role'] === 'agent') {
-                            $aid = agentIdForUser($conn, $user['id']);
-                            if ($uStatus === 'pending_verification') {
-                                $targetUrl = 'agent_verify.php';
-                            } elseif ($uStatus === 'verification_completed' || $uStatus === 'pending_subscription') {
-                                $targetUrl = 'agent_plans.php';
-                            } else {
-                                // Check active subscription
-                                $sub = $aid ? getAgentSubscription($conn, $aid) : null;
-                                if (!$sub || !$sub['is_valid']) {
+                            try {
+                                $aid = agentIdForUser($conn, $user['id']);
+                                if ($uStatus === 'pending_verification') {
+                                    $targetUrl = 'agent_verify.php';
+                                } elseif ($uStatus === 'verification_completed' || $uStatus === 'pending_subscription') {
                                     $targetUrl = 'agent_plans.php';
-                                } elseif (empty($user['profile_setup_completed'])) {
-                                    $targetUrl = 'agent_setup.php';
+                                } else {
+                                    // Check active subscription safely
+                                    $sub = ($aid && function_exists('getAgentSubscription')) ? getAgentSubscription($conn, $aid) : null;
+                                    if (!$sub || !$sub['is_valid']) {
+                                        $targetUrl = 'agent_plans.php';
+                                    } elseif (empty($user['profile_setup_completed'])) {
+                                        $targetUrl = 'agent_setup.php';
+                                    }
                                 }
+                            } catch (Throwable $ae) {
+                                $targetUrl = 'dashboard.php';
                             }
                         }
 
                         // update last login safely (support tables with or without last_login_ip)
-                        $ip = $_SERVER['REMOTE_ADDR'] ?? '';
-                        $upd = $conn->prepare("UPDATE users SET last_login_at = NOW(), last_login_ip = ? WHERE id = ?");
-                        if ($upd) {
-                            $upd->bind_param("si", $ip, $user['id']);
-                            $upd->execute();
-                            $upd->close();
-                        } else {
-                            @$conn->query("UPDATE users SET last_login_at = NOW() WHERE id = " . (int)$user['id']);
+                        try {
+                            $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+                            $upd = $conn->prepare("UPDATE users SET last_login_at = NOW(), last_login_ip = ? WHERE id = ?");
+                            if ($upd) {
+                                $upd->bind_param("si", $ip, $user['id']);
+                                $upd->execute();
+                                $upd->close();
+                            }
+                        } catch (Throwable $updEx) {
+                            try {
+                                @$conn->query("UPDATE users SET last_login_at = NOW() WHERE id = " . (int)$user['id']);
+                            } catch (Throwable $ignored) {}
                         }
 
-                        logActivity($user['id'], $user['name'], 'Login', 'User logged in successfully (' . ucfirst($user['role']) . ')');
+                        try {
+                            logActivity($user['id'], $user['name'], 'Login', 'User logged in successfully (' . ucfirst($user['role']) . ')');
+                        } catch (Throwable $logEx) {}
 
                         $conn->close();
 
@@ -272,7 +284,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $conn->close();
             } catch (Throwable $e) {
                 error_log("Login error: " . $e->getMessage());
-                $error = 'Login error. Please try again or contact administrator.';
+                $msg = $e->getMessage();
+                if (stripos($msg, "doesn't exist") !== false || stripos($msg, "Unknown column") !== false) {
+                    $error = 'Database update required: ' . htmlspecialchars($msg) . '. Please visit <a href="setup.php?force=1" style="font-weight:bold;color:#001f3f;text-decoration:underline;">setup.php</a> to run safe schema update.';
+                } else {
+                    $error = 'Login error (' . htmlspecialchars($msg) . '). Please try again or contact administrator.';
+                }
             }
         }
     }

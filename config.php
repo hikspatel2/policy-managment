@@ -117,38 +117,56 @@ function validatePassword($password) {
 
 // Rate limiting functions
 function checkLoginAttempts($username) {
-    $conn = getDBConnection();
-    $stmt = $conn->prepare("SELECT COUNT(*) as attempts FROM login_attempts
-                           WHERE username = ? AND is_success = 0 AND attempt_time > DATE_SUB(NOW(), INTERVAL ? SECOND)"); // failures only
-    $lockout = LOGIN_LOCKOUT_TIME;
-    $stmt->bind_param("si", $username, $lockout);
-    $stmt->execute();
-    $result = $stmt->get_result();
-    $row = $result->fetch_assoc();
-    $stmt->close();
-    $conn->close();
+    try {
+        $conn = getDBConnection();
+        $stmt = $conn->prepare("SELECT COUNT(*) as attempts FROM login_attempts
+                               WHERE username = ? AND is_success = 0 AND attempt_time > DATE_SUB(NOW(), INTERVAL ? SECOND)");
+        if (!$stmt) return false;
+        $lockout = LOGIN_LOCKOUT_TIME;
+        $stmt->bind_param("si", $username, $lockout);
+        $stmt->execute();
+        $result = $stmt->get_result();
+        $row = $result ? $result->fetch_assoc() : null;
+        $stmt->close();
+        $conn->close();
 
-    return $row['attempts'] >= MAX_LOGIN_ATTEMPTS;
+        return ($row && (int)$row['attempts'] >= MAX_LOGIN_ATTEMPTS);
+    } catch (Throwable $e) {
+        error_log("checkLoginAttempts error: " . $e->getMessage());
+        return false;
+    }
 }
 
 function recordLoginAttempt($username, $ok = false) {
-    $conn = getDBConnection();
-    $ip = $_SERVER['REMOTE_ADDR'];
-    $okInt = $ok ? 1 : 0;
-    $stmt = $conn->prepare("INSERT INTO login_attempts (username, ip_address, is_success) VALUES (?, ?, ?)");
-    $stmt->bind_param("ssi", $username, $ip, $okInt);
-    $stmt->execute();
-    $stmt->close();
-    $conn->close();
+    try {
+        $conn = getDBConnection();
+        $ip = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
+        $okInt = $ok ? 1 : 0;
+        $stmt = $conn->prepare("INSERT INTO login_attempts (username, ip_address, is_success) VALUES (?, ?, ?)");
+        if ($stmt) {
+            $stmt->bind_param("ssi", $username, $ip, $okInt);
+            $stmt->execute();
+            $stmt->close();
+        }
+        $conn->close();
+    } catch (Throwable $e) {
+        error_log("recordLoginAttempt error: " . $e->getMessage());
+    }
 }
 
 function clearLoginAttempts($username) {
-    $conn = getDBConnection();
-    $stmt = $conn->prepare("DELETE FROM login_attempts WHERE username = ? AND is_success = 0"); // keep success trail
-    $stmt->bind_param("s", $username);
-    $stmt->execute();
-    $stmt->close();
-    $conn->close();
+    try {
+        $conn = getDBConnection();
+        $stmt = $conn->prepare("DELETE FROM login_attempts WHERE username = ? AND is_success = 0");
+        if ($stmt) {
+            $stmt->bind_param("s", $username);
+            $stmt->execute();
+            $stmt->close();
+        }
+        $conn->close();
+    } catch (Throwable $e) {
+        error_log("clearLoginAttempts error: " . $e->getMessage());
+    }
 }
 
 // Activity Logging Functions
