@@ -46,7 +46,7 @@ if (!$ext) {
     exit();
 }
 
-if ($role === 'agent' && !empty($ext['agent_id']) && (int)$ext['agent_id'] !== $aid) {
+if ($role === 'agent' && !empty($ext['agent_id']) && $aid > 0 && (int)$ext['agent_id'] !== $aid) {
     die("Unauthorized access to document verification.");
 }
 

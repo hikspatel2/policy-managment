@@ -1102,13 +1102,15 @@ function incrementAgentUsage($conn, $agentId, $resource, $qty = 1) {
     $col = ($resource === 'ai_scan') ? 'ai_scan_count' : (($resource === 'whatsapp') ? 'whatsapp_count' : null);
     if (!$col) return false;
 
-    $st = $conn->prepare("UPDATE subscriptions SET $col = $col + ? WHERE agent_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1");
-    if ($st) {
-        $st->bind_param('ii', $qty, $aid);
-        $st->execute();
-        $st->close();
-        return true;
-    }
+    try {
+        $st = $conn->prepare("UPDATE subscriptions SET $col = $col + ? WHERE agent_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1");
+        if ($st) {
+            $st->bind_param('ii', $qty, $aid);
+            $st->execute();
+            $st->close();
+            return true;
+        }
+    } catch (\Throwable $e) {}
     return false;
 }
 
