@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Developed by Rudees Digital
  * Website: https://rudeesdigital.com
@@ -47,6 +47,7 @@ if (isset($_GET['action'])) {
                 $stmt = $conn->prepare("
                     SELECT u.id, u.name, u.email, u.phone, u.role, u.is_active,
                            COALESCE(b.name, '-') as branch_name, u.branch_id,
+                           u.customer_id, COALESCE(c.name, '') as customer_name,
                            a.agent_code,
                            DATE_FORMAT(u.created_at, '%b %d, %Y') as created_at,
                            CASE WHEN u.last_login_at IS NULL THEN '' ELSE DATE_FORMAT(u.last_login_at, '%b %d, %Y %H:%i') END as last_login,
@@ -56,6 +57,7 @@ if (isset($_GET['action'])) {
                     LEFT JOIN users cb ON cb.id = u.created_by
                     LEFT JOIN branches b ON u.branch_id = b.id
                     LEFT JOIN agents a ON u.id = a.user_id
+                    LEFT JOIN customers c ON u.customer_id = c.id
                     ORDER BY u.id DESC
                 ");
                 $stmt->execute();
@@ -68,6 +70,8 @@ if (isset($_GET['action'])) {
                         'email' => $row['email'],
                         'phone' => $row['phone'],
                         'role' => $row['role'],
+                        'customer_id' => $row['customer_id'] ? (int)$row['customer_id'] : null,
+                        'customer_name' => $row['customer_name'] ?: '',
                         'is_active' => (int)$row['is_active'],
                         'branch_name' => $row['branch_name'],
                         'branch_id' => $row['branch_id'] ? (int)$row['branch_id'] : null,
@@ -82,6 +86,23 @@ if (isset($_GET['action'])) {
                 $stmt->close();
                 $conn->close();
                 echo json_encode(['success' => true, 'data' => $users]);
+                exit();
+
+            case 'getCustomersDropdown':
+                $res = $conn->query("SELECT id, name, mobile, email FROM customers WHERE is_active = 1 ORDER BY name ASC");
+                $custs = [];
+                if ($res) {
+                    while ($r = $res->fetch_assoc()) {
+                        $custs[] = [
+                            'id' => (int)$r['id'],
+                            'name' => $r['name'],
+                            'mobile' => $r['mobile'],
+                            'email' => $r['email'] ?: ''
+                        ];
+                    }
+                }
+                $conn->close();
+                echo json_encode(['success' => true, 'data' => $custs]);
                 exit();
 
             case 'getUserActivity':
@@ -147,6 +168,7 @@ if (isset($_GET['action'])) {
                 $password = $_POST['password'] ?? '';
                 $newRole = $_POST['role'] ?? 'agent';
                 $branchId = !empty($_POST['branch_id']) ? (int)$_POST['branch_id'] : null;
+                $customerId = !empty($_POST['customer_id']) ? (int)$_POST['customer_id'] : null;
                 $isActive = isset($_POST['is_active']) ? 1 : 0;
 
                 // validate
@@ -166,7 +188,7 @@ if (isset($_GET['action'])) {
                     echo json_encode(['success' => false, 'message' => 'Password must be at least 6 characters']);
                     exit();
                 }
-                if (!in_array($newRole, ['admin', 'manager', 'agent'])) {
+                if (!in_array($newRole, ['admin', 'manager', 'agent', 'customer'], true)) {
                     echo json_encode(['success' => false, 'message' => 'Invalid role']);
                     exit();
                 }
@@ -193,15 +215,32 @@ if (isset($_GET['action'])) {
                 }
                 $stmt->close();
 
+                // Customer handling
+                if ($newRole === 'customer') {
+                    if (!$customerId) {
+                        $stC = $conn->prepare("SELECT id FROM customers WHERE email = ? OR mobile = ? LIMIT 1");
+                        $stC->bind_param("ss", $email, $phone);
+                        $stC->execute();
+                        $cRow = $stC->get_result()->fetch_assoc();
+                        $stC->close();
+                        if ($cRow) {
+                            $customerId = (int)$cRow['id'];
+                        } else {
+                            $stIns = $conn->prepare("INSERT INTO customers (name, mobile, email, created_by) VALUES (?, ?, ?, ?)");
+                            $stIns->bind_param("sssi", $name, $phone, $email, $user_id);
+                            $stIns->execute();
+                            $customerId = $stIns->insert_id;
+                            $stIns->close();
+                        }
+                    }
+                } else {
+                    $customerId = null;
+                }
+
                 $hash = password_hash($password, PASSWORD_DEFAULT);
 
-                if ($branchId) {
-                    $stmt = $conn->prepare("INSERT INTO users (name, email, phone, password_hash, role, branch_id, is_active, created_by, password_changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())");
-                    $stmt->bind_param("sssssiii", $name, $email, $phone, $hash, $newRole, $branchId, $isActive, $user_id);
-                } else {
-                    $stmt = $conn->prepare("INSERT INTO users (name, email, phone, password_hash, role, branch_id, is_active, created_by, password_changed_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, NOW())");
-                    $stmt->bind_param("sssssii", $name, $email, $phone, $hash, $newRole, $isActive, $user_id);
-                }
+                $stmt = $conn->prepare("INSERT INTO users (name, email, phone, password_hash, role, branch_id, customer_id, is_active, created_by, password_changed_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())");
+                $stmt->bind_param("sssssiiii", $name, $email, $phone, $hash, $newRole, $branchId, $customerId, $isActive, $user_id);
 
                 if (!$stmt->execute()) {
                     $stmt->close(); $conn->close();
@@ -210,6 +249,11 @@ if (isset($_GET['action'])) {
                 }
                 $insertId = $stmt->insert_id;
                 $stmt->close();
+
+                // if customer, update customer's portal_user_id
+                if ($newRole === 'customer' && $customerId) {
+                    $conn->query("UPDATE customers SET portal_user_id = $insertId WHERE id = $customerId");
+                }
 
                 // if agent, create agents record
                 if ($newRole === 'agent') {
@@ -244,7 +288,7 @@ if (isset($_GET['action'])) {
                 $bres = $conn->query("SELECT id, name FROM branches");
                 while ($b = $bres->fetch_assoc()) $branchMap[strtolower(trim($b['name']))] = (int)$b['id'];
 
-                $inserted = 0; $errors = []; $byRole = ['admin'=>0, 'manager'=>0, 'agent'=>0];
+                $inserted = 0; $errors = []; $byRole = ['admin'=>0, 'manager'=>0, 'agent'=>0, 'customer'=>0];
                 $seenEmail = []; $seenPhone = []; // within-batch dedup
                 foreach ($rows as $idx => $r) {
                     $line = $off + $idx + 1;
@@ -261,7 +305,7 @@ if (isset($_GET['action'])) {
                     if (strlen($name) < 2 || strlen($name) > 150) { $errors[] = "Row $line: name must be 2-150 characters"; continue; }
                     if (!filter_var($email, FILTER_VALIDATE_EMAIL)) { $errors[] = "Row $line: invalid email '$email'"; continue; }
                     if (!preg_match('/^\d{10,15}$/', $phone)) { $errors[] = "Row $line: phone must be 10-15 digits"; continue; }
-                    if (!in_array($newRole, ['admin', 'manager', 'agent'], true)) { $errors[] = "Row $line: invalid role '$newRole' — use admin, manager or agent"; continue; }
+                    if (!in_array($newRole, ['admin', 'manager', 'agent', 'customer'], true)) { $errors[] = "Row $line: invalid role '$newRole' — use admin, manager, agent or customer"; continue; }
                     if ($pwd === '') { $pwd = bin2hex(random_bytes(4)); } // auto-generated, admin can reset
                     elseif (strlen($pwd) < 6) { $errors[] = "Row $line: password must be at least 6 characters"; continue; }
 
@@ -303,6 +347,18 @@ if (isset($_GET['action'])) {
                                 $stmt->bind_param("issss", $newUserId, $agentCode, $name, $phone, $email);
                             }
                             $stmt->execute(); $stmt->close();
+                        } elseif ($newRole === 'customer') {
+                            $stC = $conn->prepare("SELECT id FROM customers WHERE email = ? OR mobile = ? LIMIT 1");
+                            $stC->bind_param("ss", $email, $phone); $stC->execute();
+                            $cRow = $stC->get_result()->fetch_assoc(); $stC->close();
+                            $cId = $cRow ? (int)$cRow['id'] : 0;
+                            if (!$cId) {
+                                $stIns = $conn->prepare("INSERT INTO customers (name, mobile, email, created_by) VALUES (?, ?, ?, ?)");
+                                $stIns->bind_param("sssi", $name, $phone, $email, $user_id);
+                                $stIns->execute(); $cId = (int)$stIns->insert_id; $stIns->close();
+                            }
+                            $conn->query("UPDATE users SET customer_id = $cId WHERE id = $newUserId");
+                            $conn->query("UPDATE customers SET portal_user_id = $newUserId WHERE id = $cId");
                         }
 
                         $conn->commit();
@@ -315,7 +371,7 @@ if (isset($_GET['action'])) {
                     }
                 }
 
-                logActivity($user_id, $username, 'Bulk User Add', "Added $inserted users (admin: {$byRole['admin']}, manager: {$byRole['manager']}, agent: {$byRole['agent']}), " . count($errors) . " errors");
+                logActivity($user_id, $username, 'Bulk User Add', "Added $inserted users (admin: {$byRole['admin']}, manager: {$byRole['manager']}, agent: {$byRole['agent']}, customer: {$byRole['customer']}), " . count($errors) . " errors");
                 $conn->close();
                 $msg = "$inserted user(s) added." . ($byRole['admin'] ? " {$byRole['admin']} with full admin access." : "");
                 echo json_encode(['success'=>true, 'message'=>$msg, 'inserted'=>$inserted, 'errors'=>$errors]);
@@ -339,6 +395,7 @@ if (isset($_GET['action'])) {
                 $password = $_POST['password'] ?? '';
                 $newRole = $_POST['role'] ?? 'agent';
                 $branchId = !empty($_POST['branch_id']) ? (int)$_POST['branch_id'] : null;
+                $customerId = !empty($_POST['customer_id']) ? (int)$_POST['customer_id'] : null;
                 $isActive = isset($_POST['is_active']) ? 1 : 0;
 
                 if ($uid <= 0) {
@@ -363,7 +420,7 @@ if (isset($_GET['action'])) {
                     echo json_encode(['success' => false, 'message' => 'Password must be at least 6 characters']);
                     exit();
                 }
-                if (!in_array($newRole, ['admin', 'manager', 'agent'])) {
+                if (!in_array($newRole, ['admin', 'manager', 'agent', 'customer'], true)) {
                     echo json_encode(['success' => false, 'message' => 'Invalid role']);
                     exit();
                 }
@@ -390,6 +447,20 @@ if (isset($_GET['action'])) {
                 }
                 $stmt->close();
 
+                // Customer handling
+                if ($newRole === 'customer') {
+                    if (!$customerId) {
+                        $stC = $conn->prepare("SELECT id FROM customers WHERE email = ? OR mobile = ? LIMIT 1");
+                        $stC->bind_param("ss", $email, $phone);
+                        $stC->execute();
+                        $cRow = $stC->get_result()->fetch_assoc();
+                        $stC->close();
+                        if ($cRow) $customerId = (int)$cRow['id'];
+                    }
+                } else {
+                    $customerId = null;
+                }
+
                 // get old role for agent check
                 $stmt = $conn->prepare("SELECT role FROM users WHERE id = ?");
                 $stmt->bind_param("i", $uid);
@@ -406,27 +477,22 @@ if (isset($_GET['action'])) {
                 // build update query
                 if (!empty($password)) {
                     $hash = password_hash($password, PASSWORD_DEFAULT);
-                    if ($branchId) {
-                        $stmt = $conn->prepare("UPDATE users SET name=?, email=?, phone=?, password_hash=?, password_changed_at=NOW(), role=?, branch_id=?, is_active=? WHERE id=?");
-                        $stmt->bind_param("sssssiii", $name, $email, $phone, $hash, $newRole, $branchId, $isActive, $uid);
-                    } else {
-                        $stmt = $conn->prepare("UPDATE users SET name=?, email=?, phone=?, password_hash=?, password_changed_at=NOW(), role=?, branch_id=NULL, is_active=? WHERE id=?");
-                        $stmt->bind_param("sssssii", $name, $email, $phone, $hash, $newRole, $isActive, $uid);
-                    }
+                    $stmt = $conn->prepare("UPDATE users SET name=?, email=?, phone=?, password_hash=?, password_changed_at=NOW(), role=?, branch_id=?, customer_id=?, is_active=? WHERE id=?");
+                    $stmt->bind_param("sssssiiii", $name, $email, $phone, $hash, $newRole, $branchId, $customerId, $isActive, $uid);
                 } else {
-                    if ($branchId) {
-                        $stmt = $conn->prepare("UPDATE users SET name=?, email=?, phone=?, role=?, branch_id=?, is_active=? WHERE id=?");
-                        $stmt->bind_param("ssssiii", $name, $email, $phone, $newRole, $branchId, $isActive, $uid);
-                    } else {
-                        $stmt = $conn->prepare("UPDATE users SET name=?, email=?, phone=?, role=?, branch_id=NULL, is_active=? WHERE id=?");
-                        $stmt->bind_param("ssssii", $name, $email, $phone, $newRole, $isActive, $uid);
-                    }
+                    $stmt = $conn->prepare("UPDATE users SET name=?, email=?, phone=?, role=?, branch_id=?, customer_id=?, is_active=? WHERE id=?");
+                    $stmt->bind_param("ssssiiii", $name, $email, $phone, $newRole, $branchId, $customerId, $isActive, $uid);
                 }
 
                 if (!$stmt->execute()) {
                     $stmt->close(); $conn->close();
                     echo json_encode(['success' => false, 'message' => 'Failed to update user']);
                     exit();
+                }
+                $stmt->close();
+
+                if ($newRole === 'customer' && $customerId) {
+                    $conn->query("UPDATE customers SET portal_user_id = $uid WHERE id = $customerId");
                 }
                 $stmt->close();
 
@@ -666,6 +732,7 @@ $isAdmin = ($role === 'admin');
                     <option value="admin">Admin</option>
                     <option value="manager">Manager</option>
                     <option value="agent">Agent</option>
+                    <option value="customer">Customer / Policy Holder</option>
                 </select></div>
                 <div class="hf-field"><label for="filterBranch" title="Branch"><i class="fas fa-building"></i></label><select id="filterBranch" class="filter-input searchable">
                     <option value="">All Branches</option>
@@ -752,10 +819,17 @@ $isAdmin = ($role === 'admin');
                         </div>
                         <div class="form-group">
                             <label><i class="fas fa-user-tag"></i> Role *</label>
-                            <select id="userRole" name="role" required class="searchable">
+                            <select id="userRole" name="role" required class="searchable" onchange="onRoleChange(this.value)">
                                 <option value="agent">Agent</option>
                                 <option value="manager">Manager</option>
                                 <option value="admin">Admin</option>
+                                <option value="customer">Customer / Policy Holder</option>
+                            </select>
+                        </div>
+                        <div class="form-group" id="userCustomerGroup" style="display:none;">
+                            <label><i class="fas fa-address-book"></i> Link Customer Profile</label>
+                            <select id="userCustomer" name="customer_id" class="searchable">
+                                <option value="">— Auto-create new Customer Profile —</option>
                             </select>
                         </div>
                         <div class="form-group">
@@ -799,6 +873,7 @@ $isAdmin = ($role === 'admin');
 
         $(document).ready(function() {
             loadBranches();
+            loadCustomersDropdown();
             loadUsers();
         });
 
@@ -868,11 +943,13 @@ $isAdmin = ($role === 'admin');
                     data: 'role',
                     title: 'Role',
                     render: function(d, type, row) {
-                        const cls = d === 'admin' ? 'status-admin' : d === 'manager' ? 'status-manager' : 'status-agent';
-                        const label = escapeHtml(d.charAt(0).toUpperCase() + d.slice(1));
+                        const cls = d === 'admin' ? 'status-admin' : d === 'manager' ? 'status-manager' : d === 'customer' ? 'status-customer' : 'status-agent';
+                        const label = d === 'customer' ? 'Customer' : escapeHtml(d.charAt(0).toUpperCase() + d.slice(1));
                         let html = `<span class="status-badge ${cls}">${label}</span>`;
                         if (d === 'agent' && row.agent_code) {
                             html += ` <span class="badge-code">${escapeHtml(row.agent_code)}</span>`;
+                        } else if (d === 'customer' && row.customer_name) {
+                            html += ` <span class="badge-code"><i class="fas fa-user-check"></i> ${escapeHtml(row.customer_name)}</span>`;
                         }
                         return html;
                     }
@@ -1006,12 +1083,38 @@ $isAdmin = ($role === 'admin');
         const ROLE_CAPS = {
             admin: ['Full system access', 'Manage users, branches & roles', 'Create/edit/delete all records', 'View activity logs & reports', 'Send notifications'],
             manager: ['Manage policies, agents & customers', 'View branch reports', 'Create & assign tasks', 'No user/branch management', 'Cannot delete users'],
-            agent: ['View & enter own policies', 'View own commission', 'See own notifications', 'Read-only on most modules', 'No admin tools']
+            agent: ['View & enter own policies', 'Add & manage assigned customers', 'View own commission & book', 'Submit claim intimations', 'No admin tools'],
+            customer: ['Personal & family policy portal', 'View personal & family policies (Motor, Health, Life)', 'Download policy PDFs & documents', 'Submit & track claim intimations', 'Manage family members', 'Financial data & commissions hidden for privacy']
         };
+
+        function onRoleChange(role) {
+            if (role === 'customer') {
+                $('#userCustomerGroup').show();
+            } else {
+                $('#userCustomerGroup').hide();
+                $('#userCustomer').val('');
+            }
+            var el = document.getElementById('userCustomer');
+            if (el && el.sdRefresh) el.sdRefresh();
+        }
+
+        function loadCustomersDropdown(selId) {
+            $.getJSON('?action=getCustomersDropdown', function(res) {
+                if (!res.success) return;
+                var sel = $('#userCustomer');
+                sel.find('option:not(:first)').remove();
+                res.data.forEach(function(c) {
+                    sel.append($('<option>').val(c.id).text(c.name + ' (' + c.mobile + ')'));
+                });
+                if (selId) sel.val(selId);
+                var el = sel[0];
+                if (el && el.sdRefresh) el.sdRefresh();
+            });
+        }
 
         // tabbed view modal — Profile / Activity Log / Permissions
         function viewRecord(d) {
-            var roleCls = d.role === 'admin' ? 'status-admin' : d.role === 'manager' ? 'status-manager' : 'status-agent';
+            var roleCls = d.role === 'admin' ? 'status-admin' : d.role === 'manager' ? 'status-manager' : d.role === 'customer' ? 'status-customer' : 'status-agent';
             var statusCls = d.is_active ? 'status-active' : 'status-inactive';
 
             var profile = '<table class="view-detail-table">';
@@ -1123,10 +1226,13 @@ $isAdmin = ($role === 'admin');
             $('#modalTitle').html('<i class="fas fa-user-plus"></i> Add User');
             $('#userForm')[0].reset();
             $('#userId').val('');
+            $('#userRole').val('agent');
+            onRoleChange('agent');
             $('#userIsActive').prop('checked', true);
             $('#passwordHint').hide();
             $('#userPassword').attr('required', true);
             $('#userModal').addClass('active');
+            document.querySelectorAll('select.searchable').forEach(function(s) { if (s.sdRefresh) s.sdRefresh(); });
         }
 
         function editUser(user) {
@@ -1137,6 +1243,8 @@ $isAdmin = ($role === 'admin');
             $('#userEmail').val(user.email);
             $('#userPhone').val(user.phone);
             $('#userRole').val(user.role);
+            onRoleChange(user.role);
+            if (user.customer_id) $('#userCustomer').val(user.customer_id);
             $('#userBranch').val(user.branch_id || '');
             $('#userIsActive').prop('checked', !!user.is_active);
             $('#userPassword').val('').removeAttr('required');
@@ -1247,7 +1355,7 @@ $isAdmin = ($role === 'admin');
                 { key: 'phone', label: 'Phone *', cls: 'bg-phone', req: true, max: 15, digits: true, ph: '10-15 digits', aliases: ['phone', 'phoneno', 'mobile', 'mobileno', 'contact', 'contactno', 'whatsapp'], demo: '9876543210', demo2: '9876543211' },
                 { key: 'password', label: 'Password', cls: 'bg-pwd', ph: 'blank = auto', aliases: ['password', 'pwd', 'pass'], demo: '', demo2: '' },
                 { key: 'role', label: 'Role', cls: 'bg-role', type: 'select', def: 'agent',
-                  opts: [{ v: 'agent', t: 'Agent' }, { v: 'manager', t: 'Manager' }, { v: 'admin', t: 'Admin' }],
+                  opts: [{ v: 'agent', t: 'Agent' }, { v: 'manager', t: 'Manager' }, { v: 'admin', t: 'Admin' }, { v: 'customer', t: 'Customer' }],
                   aliases: ['role', 'usertype', 'type', 'designation'], demo: 'manager', demo2: 'agent' },
                 { key: 'branch', label: 'Branch', cls: 'bg-branch', ph: 'branch name', aliases: ['branch', 'branchname', 'office', 'location'],
                   demo: '', demo2: '' },

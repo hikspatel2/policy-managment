@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Developed by Rudees Digital
  * Website: https://rudeesdigital.com
@@ -65,13 +65,24 @@ if (isset($_GET['action'])) {
 
     try {
         $conn = getDBConnection();
+        $isCustomer = ($role === 'customer');
+        $myCustId = $isCustomer ? (customerIdForUser($conn, $user_id) ?? (int)($_SESSION['customer_id'] ?? 0)) : 0;
+        $famIds = $isCustomer ? getFamilyCustomerIds($conn, $myCustId) : [];
+        if ($isCustomer && empty($famIds)) $famIds = [$myCustId ?: 0];
+
         $scope = $role === 'agent' ? (agentIdForUser($conn, $user_id) ?? 0) : null;
 
-        // per-customer reads: agent only its own customers
-        if (in_array($_GET['action'], ['getCustomerPolicies', 'getCustomerVehicles', 'getCustomerPoints'], true)
-            && !custOwned($conn, (int)($_GET['id'] ?? 0), $scope)) {
-            echo json_encode(['success' => false, 'message' => 'Customer not found']);
-            exit();
+        // per-customer reads: agent only its own customers; customer only self & family
+        if (in_array($_GET['action'], ['getCustomerPolicies', 'getCustomerVehicles', 'getCustomerPoints'], true)) {
+            $reqCid = (int)($_GET['id'] ?? 0);
+            if ($isCustomer && !in_array($reqCid, $famIds, true)) {
+                echo json_encode(['success' => false, 'message' => 'Customer not found']);
+                exit();
+            }
+            if ($role === 'agent' && !custOwned($conn, $reqCid, $scope)) {
+                echo json_encode(['success' => false, 'message' => 'Customer not found']);
+                exit();
+            }
         }
 
         switch ($_GET['action']) {
@@ -79,19 +90,30 @@ if (isset($_GET['action'])) {
             case 'getCustomers':
                 // policy count + last policy date via subqueries; agent = own customers, own policies counted
                 $pf = $scope === null ? '' : ' AND pe.agent_id = ?';
+                if ($isCustomer) {
+                    $whereClause = "WHERE c.id IN (" . implode(',', array_map('intval', $famIds)) . ")";
+                } elseif ($scope !== null) {
+                    $whereClause = 'WHERE ' . CUST_OWN_SQL;
+                } else {
+                    $whereClause = '';
+                }
+
                 $stmt = $conn->prepare("
                     SELECT c.*, COALESCE(ref.name, '-') as referred_by_name, ag.name as agent_name, ag.agent_code, cu.name as created_by_name,
+                           head.name as family_head_name, u_portal.email as portal_email, u_portal.is_active as portal_is_active,
                            DATE_FORMAT(c.created_at, '%b %d, %Y') as created_fmt,
                            (SELECT COUNT(*) FROM policy_entries pe WHERE pe.customer_id = c.id$pf) as policy_count,
                            (SELECT DATE_FORMAT(MAX(pe.entry_date), '%b %d, %Y') FROM policy_entries pe WHERE pe.customer_id = c.id$pf) as last_policy_fmt
                     FROM customers c
                     LEFT JOIN customers ref ON c.referred_by = ref.id
+                    LEFT JOIN customers head ON c.family_head_id = head.id
                     LEFT JOIN agents ag ON c.agent_id = ag.id
                     LEFT JOIN users cu ON c.created_by = cu.id
-                    " . ($scope === null ? '' : 'WHERE ' . CUST_OWN_SQL) . "
-                    ORDER BY c.id DESC
+                    LEFT JOIN users u_portal ON c.portal_user_id = u_portal.id
+                    $whereClause
+                    ORDER BY CASE WHEN c.id = " . (int)$myCustId . " THEN 0 ELSE 1 END, c.id DESC
                 ");
-                if ($scope !== null) $stmt->bind_param('iiii', $scope, $scope, $scope, $scope);
+                if ($scope !== null && !$isCustomer) $stmt->bind_param('iiii', $scope, $scope, $scope, $scope);
                 $stmt->execute();
                 $res = $stmt->get_result();
                 $customers = [];
@@ -106,6 +128,12 @@ if (isset($_GET['action'])) {
                         'referral_code' => $row['referral_code'],
                         'referred_by' => $row['referred_by'] ? (int)$row['referred_by'] : null,
                         'referred_by_name' => $row['referred_by_name'],
+                        'family_head_id' => $row['family_head_id'] ? (int)$row['family_head_id'] : null,
+                        'family_head_name' => $row['family_head_name'] ?: '',
+                        'family_relation' => $row['family_relation'] ?: ($row['id'] == $myCustId ? 'Self (Head)' : 'Family Member'),
+                        'portal_user_id' => $row['portal_user_id'] ? (int)$row['portal_user_id'] : null,
+                        'portal_email' => $row['portal_email'] ?: '',
+                        'has_portal' => !empty($row['portal_user_id']) || !empty($row['portal_email']),
                         'points_balance' => (int)$row['points_balance'],
                         'agent_id' => $row['agent_id'] ? (int)$row['agent_id'] : null,
                         'agent_name' => $row['agent_name'] ? $row['agent_name'] . ' (' . $row['agent_code'] . ')' : '',
@@ -249,7 +277,7 @@ if (isset($_GET['action'])) {
                     exit();
                 }
                 if (!validateCSRFToken($_POST['csrf_token'] ?? '')) { echo json_encode(['success'=>false,'message'=>'Invalid request']); exit; }
-                if ($role !== 'admin') {
+                if ($role !== 'admin' && $role !== 'manager' && $role !== 'agent') {
                     echo json_encode(['success' => false, 'message' => 'Access denied']);
                     exit();
                 }
@@ -260,6 +288,8 @@ if (isset($_GET['action'])) {
                 $address = trim($_POST['address'] ?? '');
                 $state = trim($_POST['state'] ?? '');
                 $referredBy = !empty($_POST['referred_by']) ? (int)$_POST['referred_by'] : null;
+                $familyHeadId = !empty($_POST['family_head_id']) ? (int)$_POST['family_head_id'] : null;
+                $familyRelation = trim($_POST['family_relation'] ?? '') ?: 'Self';
 
                 // validate
                 if (strlen($name) < 2 || strlen($name) > 150) {
@@ -292,18 +322,18 @@ if (isset($_GET['action'])) {
                 if (is_string($ex)) { $conn->close(); echo json_encode(['success' => false, 'message' => $ex]); exit(); }
                 [$agentId, $ckyc, $waNo, $dob, $city, $pin] = $ex;
 
+                // Agent role auto-assigns itself
+                if ($role === 'agent') {
+                    $agentId = agentIdForUser($conn, $user_id);
+                }
+
                 // insert without referral_code first
                 $emailVal = $email ?: null;
                 $addressVal = $address ?: null;
                 $stateVal = $state ?: null;
 
-                if ($referredBy) {
-                    $stmt = $conn->prepare("INSERT INTO customers (name, mobile, email, address, state, referred_by, agent_id, ckyc_number, whatsapp_number, date_of_birth, city, pincode, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-                    $stmt->bind_param("sssssiisssssi", $name, $mobile, $emailVal, $addressVal, $stateVal, $referredBy, $agentId, $ckyc, $waNo, $dob, $city, $pin, $user_id);
-                } else {
-                    $stmt = $conn->prepare("INSERT INTO customers (name, mobile, email, address, state, agent_id, ckyc_number, whatsapp_number, date_of_birth, city, pincode, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-                    $stmt->bind_param("sssssisssssi", $name, $mobile, $emailVal, $addressVal, $stateVal, $agentId, $ckyc, $waNo, $dob, $city, $pin, $user_id);
-                }
+                $stmt = $conn->prepare("INSERT INTO customers (name, mobile, email, address, state, referred_by, agent_id, family_head_id, family_relation, ckyc_number, whatsapp_number, date_of_birth, city, pincode, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                $stmt->bind_param("sssssiisssssssi", $name, $mobile, $emailVal, $addressVal, $stateVal, $referredBy, $agentId, $familyHeadId, $familyRelation, $ckyc, $waNo, $dob, $city, $pin, $user_id);
 
                 if (!$stmt->execute()) {
                     $stmt->close(); $conn->close();
@@ -319,6 +349,28 @@ if (isset($_GET['action'])) {
                 $stmt->bind_param("si", $refCode, $insertId);
                 $stmt->execute();
                 $stmt->close();
+
+                // Check if user requested to create a portal login immediately
+                $portalPwd = trim($_POST['portal_password'] ?? '');
+                if (!empty($_POST['create_portal_login']) && strlen($portalPwd) >= 6) {
+                    $pEmail = $email ?: ($mobile . '@customer.local');
+                    $pHolderPhone = $mobile;
+                    $stU = $conn->prepare("SELECT id FROM users WHERE email = ? OR phone = ?");
+                    $stU->bind_param("ss", $pEmail, $pHolderPhone); $stU->execute();
+                    $uEx = $stU->get_result()->fetch_assoc(); $stU->close();
+                    $hash = password_hash($portalPwd, PASSWORD_DEFAULT);
+                    if ($uEx) {
+                        $pUid = (int)$uEx['id'];
+                        $conn->query("UPDATE users SET customer_id = $insertId, role = 'customer', password_hash = '$hash', is_active = 1 WHERE id = $pUid");
+                    } else {
+                        $stInsU = $conn->prepare("INSERT INTO users (name, email, phone, password_hash, role, customer_id, is_active, created_by, password_changed_at) VALUES (?, ?, ?, ?, 'customer', ?, 1, ?, NOW())");
+                        $stInsU->bind_param("ssssii", $name, $pEmail, $pHolderPhone, $hash, $insertId, $user_id);
+                        $stInsU->execute();
+                        $pUid = (int)$stInsU->insert_id;
+                        $stInsU->close();
+                    }
+                    $conn->query("UPDATE customers SET portal_user_id = $pUid WHERE id = $insertId");
+                }
 
                 logActivity($user_id, $username, 'Customer Created', "Created customer: $name (#$insertId)" . ($agentId ? ", agent #$agentId" : '') . ($city ? ", $city" : '') . ($ckyc ? ", CKYC $ckyc" : ''));
                 $conn->close();
@@ -410,18 +462,21 @@ if (isset($_GET['action'])) {
                     exit();
                 }
                 if (!validateCSRFToken($_POST['csrf_token'] ?? '')) { echo json_encode(['success'=>false,'message'=>'Invalid request']); exit; }
-                if ($role !== 'admin') {
+
+                $cid = (int)($_POST['id'] ?? 0);
+                if ($role !== 'admin' && $role !== 'manager' && !($role === 'agent' && custOwned($conn, $cid, $scope))) {
                     echo json_encode(['success' => false, 'message' => 'Access denied']);
                     exit();
                 }
 
-                $cid = (int)($_POST['id'] ?? 0);
                 $name = trim($_POST['name'] ?? '');
                 $mobile = trim($_POST['mobile'] ?? '');
                 $email = trim($_POST['email'] ?? '');
                 $address = trim($_POST['address'] ?? '');
                 $state = trim($_POST['state'] ?? '');
                 $referredBy = !empty($_POST['referred_by']) ? (int)$_POST['referred_by'] : null;
+                $familyHeadId = !empty($_POST['family_head_id']) ? (int)$_POST['family_head_id'] : null;
+                $familyRelation = trim($_POST['family_relation'] ?? '') ?: 'Self';
                 $isActive = isset($_POST['is_active']) ? 1 : 0;
 
                 if ($cid <= 0) {
@@ -470,14 +525,13 @@ if (isset($_GET['action'])) {
                 if (is_string($ex)) { $conn->close(); echo json_encode(['success' => false, 'message' => $ex]); exit(); }
                 [$agentId, $ckyc, $waNo, $dob, $city, $pin] = $ex;
 
-                // no referral_code update
-                if ($referredBy) {
-                    $stmt = $conn->prepare("UPDATE customers SET name=?, mobile=?, email=?, address=?, state=?, referred_by=?, agent_id=?, ckyc_number=?, whatsapp_number=?, date_of_birth=?, city=?, pincode=?, is_active=? WHERE id=?");
-                    $stmt->bind_param("sssssiisssssii", $name, $mobile, $emailVal, $addressVal, $stateVal, $referredBy, $agentId, $ckyc, $waNo, $dob, $city, $pin, $isActive, $cid);
-                } else {
-                    $stmt = $conn->prepare("UPDATE customers SET name=?, mobile=?, email=?, address=?, state=?, referred_by=NULL, agent_id=?, ckyc_number=?, whatsapp_number=?, date_of_birth=?, city=?, pincode=?, is_active=? WHERE id=?");
-                    $stmt->bind_param("sssssisssssii", $name, $mobile, $emailVal, $addressVal, $stateVal, $agentId, $ckyc, $waNo, $dob, $city, $pin, $isActive, $cid);
+                // Agent role keeps own id
+                if ($role === 'agent') {
+                    $agentId = agentIdForUser($conn, $user_id);
                 }
+
+                $stmt = $conn->prepare("UPDATE customers SET name=?, mobile=?, email=?, address=?, state=?, referred_by=?, agent_id=?, family_head_id=?, family_relation=?, ckyc_number=?, whatsapp_number=?, date_of_birth=?, city=?, pincode=?, is_active=? WHERE id=?");
+                $stmt->bind_param("sssssiisssssssii", $name, $mobile, $emailVal, $addressVal, $stateVal, $referredBy, $agentId, $familyHeadId, $familyRelation, $ckyc, $waNo, $dob, $city, $pin, $isActive, $cid);
 
                 if (!$stmt->execute()) {
                     $stmt->close(); $conn->close();
@@ -489,6 +543,132 @@ if (isset($_GET['action'])) {
                 logActivity($user_id, $username, 'Customer Updated', "Updated customer #$cid: $name" . ($agentId ? ", agent #$agentId" : ', no agent') . ($city ? ", $city" : '') . ($ckyc ? ", CKYC $ckyc" : '') . ($waNo ? ", WA $waNo" : ''));
                 $conn->close();
                 echo json_encode(['success' => true, 'message' => 'Customer updated successfully']);
+                exit();
+
+            case 'createPortalLogin':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') { echo json_encode(['success'=>false,'message'=>'Invalid request method']); exit(); }
+                if (!validateCSRFToken($_POST['csrf_token'] ?? '')) { echo json_encode(['success'=>false,'message'=>'Invalid request']); exit; }
+                if ($role !== 'admin' && $role !== 'manager' && $role !== 'agent') { echo json_encode(['success'=>false,'message'=>'Access denied']); exit(); }
+
+                $cid = (int)($_POST['customer_id'] ?? 0);
+                $pwd = trim($_POST['password'] ?? '');
+                $email = trim($_POST['email'] ?? '');
+                $phone = trim($_POST['phone'] ?? '');
+
+                if ($cid <= 0) { echo json_encode(['success'=>false,'message'=>'Invalid customer']); exit; }
+                if (strlen($pwd) < 6) { echo json_encode(['success'=>false,'message'=>'Password must be at least 6 characters']); exit; }
+
+                $st = $conn->prepare("SELECT name, email, mobile, portal_user_id FROM customers WHERE id = ?");
+                $st->bind_param("i", $cid); $st->execute();
+                $c = $st->get_result()->fetch_assoc(); $st->close();
+                if (!$c) { echo json_encode(['success'=>false,'message'=>'Customer not found']); exit; }
+
+                $email = $email ?: $c['email'];
+                $phone = $phone ?: $c['mobile'];
+                $name = $c['name'];
+
+                if (!filter_var($email, FILTER_VALIDATE_EMAIL)) { echo json_encode(['success'=>false,'message'=>'Valid email is required for login']); exit; }
+                if (!preg_match('/^\d{10,15}$/', $phone)) { echo json_encode(['success'=>false,'message'=>'10-15 digit phone is required']); exit; }
+
+                $stU = $conn->prepare("SELECT id FROM users WHERE email = ? OR phone = ?");
+                $stU->bind_param("ss", $email, $phone); $stU->execute();
+                $existing = $stU->get_result()->fetch_assoc(); $stU->close();
+
+                $hash = password_hash($pwd, PASSWORD_DEFAULT);
+                if ($existing) {
+                    $uid = (int)$existing['id'];
+                    $conn->query("UPDATE users SET customer_id = $cid, role = 'customer', password_hash = '$hash', is_active = 1 WHERE id = $uid");
+                } else {
+                    $stIns = $conn->prepare("INSERT INTO users (name, email, phone, password_hash, role, customer_id, is_active, created_by, password_changed_at) VALUES (?, ?, ?, ?, 'customer', ?, 1, ?, NOW())");
+                    $stIns->bind_param("ssssii", $name, $email, $phone, $hash, $cid, $user_id);
+                    $stIns->execute();
+                    $uid = (int)$stIns->insert_id;
+                    $stIns->close();
+                }
+
+                $conn->query("UPDATE customers SET portal_user_id = $uid WHERE id = $cid");
+                logActivity($user_id, $username, 'Portal Login Created', "Created customer portal access for $name (#$cid)");
+                $conn->close();
+                echo json_encode(['success'=>true, 'message'=>'Portal login active! Customer can log in with: ' . htmlspecialchars($email)]);
+                exit();
+
+            case 'getFamilyMembers':
+                $cid = (int)($_GET['id'] ?? 0);
+                if ($cid <= 0 && $role === 'customer') {
+                    $cid = $myCustId;
+                }
+                if ($cid <= 0) { echo json_encode(['success'=>false,'message'=>'Invalid customer']); exit; }
+
+                $famIds = getFamilyCustomerIds($conn, $cid);
+                if (empty($famIds)) $famIds = [$cid];
+                $in = implode(',', array_map('intval', $famIds));
+
+                $res = $conn->query("
+                    SELECT c.id, c.name, c.mobile, c.email, c.date_of_birth, c.family_relation, c.family_head_id,
+                           (SELECT COUNT(*) FROM policy_entries pe WHERE pe.customer_id = c.id AND pe.status = 'active') as active_policies,
+                           (SELECT GROUP_CONCAT(DISTINCT pe.insurance_category) FROM policy_entries pe WHERE pe.customer_id = c.id) as verticals
+                    FROM customers c
+                    WHERE c.id IN ($in)
+                    ORDER BY CASE WHEN c.id = $cid THEN 0 ELSE 1 END, c.id ASC
+                ");
+                $members = [];
+                if ($res) {
+                    while ($r = $res->fetch_assoc()) {
+                        $members[] = [
+                            'id' => (int)$r['id'],
+                            'name' => $r['name'],
+                            'mobile' => $r['mobile'],
+                            'email' => $r['email'] ?: '-',
+                            'dob' => $r['date_of_birth'] ?: '-',
+                            'relation' => $r['family_relation'] ?: ($r['id'] === $cid ? 'Self (Head)' : 'Member'),
+                            'active_policies' => (int)$r['active_policies'],
+                            'verticals' => $r['verticals'] ?: '-'
+                        ];
+                    }
+                }
+                $conn->close();
+                echo json_encode(['success'=>true, 'data'=>$members]);
+                exit();
+
+            case 'addFamilyMember':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') { echo json_encode(['success'=>false,'message'=>'Invalid request']); exit; }
+                if (!validateCSRFToken($_POST['csrf_token'] ?? '')) { echo json_encode(['success'=>false,'message'=>'Invalid request']); exit; }
+
+                $headId = (int)($_POST['head_customer_id'] ?? 0);
+                if ($headId <= 0 && $role === 'customer') {
+                    $headId = $myCustId;
+                }
+                if ($headId <= 0) { echo json_encode(['success'=>false,'message'=>'Family head customer required']); exit; }
+
+                $name = trim($_POST['name'] ?? '');
+                $relation = trim($_POST['family_relation'] ?? '') ?: 'Spouse';
+                $mobile = trim($_POST['mobile'] ?? '');
+                $dob = !empty($_POST['date_of_birth']) ? $_POST['date_of_birth'] : null;
+                $email = trim($_POST['email'] ?? '') ?: null;
+
+                if (strlen($name) < 2) { echo json_encode(['success'=>false,'message'=>'Name is required']); exit; }
+                
+                $stH = $conn->prepare("SELECT mobile, agent_id FROM customers WHERE id = ?");
+                $stH->bind_param("i", $headId); $stH->execute();
+                $head = $stH->get_result()->fetch_assoc(); $stH->close();
+                if (!$mobile) $mobile = $head['mobile'] ?? '';
+                $agId = $head['agent_id'] ?? null;
+
+                $stIns = $conn->prepare("INSERT INTO customers (name, mobile, email, date_of_birth, family_head_id, family_relation, agent_id, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
+                $stIns->bind_param("ssssisii", $name, $mobile, $email, $dob, $headId, $relation, $agId, $user_id);
+                if (!$stIns->execute()) {
+                    $stIns->close(); $conn->close();
+                    echo json_encode(['success'=>false,'message'=>'Failed to add family member']);
+                    exit();
+                }
+                $newId = (int)$stIns->insert_id;
+                $stIns->close();
+                $refCode = 'REF-' . str_pad($newId, 4, '0', STR_PAD_LEFT);
+                $conn->query("UPDATE customers SET referral_code = '$refCode' WHERE id = $newId");
+
+                logActivity($user_id, $username, 'Family Member Added', "Added $name ($relation) to family of customer #$headId");
+                $conn->close();
+                echo json_encode(['success'=>true, 'message'=>'Family member added successfully! Policies can now be issued under this member.', 'data'=>['id'=>$newId]]);
                 exit();
 
             case 'bulkDelete':
@@ -637,12 +817,15 @@ $isAdmin = ($role === 'admin');
         <div class="main-content">
             <?php
             $pageIcon    = 'fa-users';
-            $pageTitle   = $role === 'agent' ? 'My Customers' : 'Customer Management';
-            $crumbs      = $role === 'agent' ? [] : [['label' => 'Buyers', 'icon' => 'fa-users']];
+            $pageIcon    = $role === 'customer' ? 'fa-people-roof' : 'fa-users';
+            $pageTitle   = $role === 'customer' ? 'My Family Members' : ($role === 'agent' ? 'My Customers' : 'Customer Management');
+            $crumbs      = in_array($role, ['agent', 'customer'], true) ? [] : [['label' => 'Buyers', 'icon' => 'fa-users']];
             $pageActions = [];
-            if ($isAdmin) {
+            if ($isAdmin || $role === 'manager' || $role === 'agent') {
                 $pageActions[] = ['label' => 'Add Customer', 'icon' => 'fa-plus', 'onclick' => 'openAddModal()', 'class' => 'primary'];
-                $pageActions[] = ['label' => 'Bulk Add / Import', 'icon' => 'fa-file-excel', 'onclick' => 'customersImport.open()'];
+                if ($isAdmin) $pageActions[] = ['label' => 'Bulk Add / Import', 'icon' => 'fa-file-excel', 'onclick' => 'customersImport.open()'];
+            } elseif ($role === 'customer') {
+                $pageActions[] = ['label' => 'Add Family Member', 'icon' => 'fa-user-plus', 'onclick' => 'openAddFamilyModal()', 'class' => 'primary'];
             }
             // agent = read-only list of its own customers, exports kept
             $pageActions[] = ['label' => 'CSV',     'icon' => 'fa-file-csv', 'onclick' => "dtBtn(custTable,'csv')"];
@@ -709,7 +892,7 @@ $isAdmin = ($role === 'admin');
         </div>
     </div>
 
-    <?php if ($isAdmin): ?>
+    <?php if ($isAdmin || $role === 'agent' || $role === 'manager' || $role === 'customer'): ?>
     <!-- Customer Modal -->
     <div class="modal-overlay" id="customerModal">
         <div class="modal" onclick="event.stopPropagation()">
@@ -767,6 +950,24 @@ $isAdmin = ($role === 'admin');
                             <label><i class="fas fa-map-marker-alt"></i> State</label>
                             <input type="text" id="custState" name="state" placeholder="State">
                         </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-people-roof"></i> Family Relation</label>
+                            <select id="custFamilyRelation" name="family_relation" class="searchable">
+                                <option value="Self">Self (Head of Family)</option>
+                                <option value="Spouse">Spouse (Wife / Husband)</option>
+                                <option value="Son">Son</option>
+                                <option value="Daughter">Daughter</option>
+                                <option value="Father">Father</option>
+                                <option value="Mother">Mother</option>
+                                <option value="Other">Other Family Member</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-user-group"></i> Head of Family</label>
+                            <select id="custFamilyHead" name="family_head_id" class="searchable">
+                                <option value="">— This person is Head of Family —</option>
+                            </select>
+                        </div>
                         <div class="form-group" style="grid-column: 1 / -1;">
                             <label><i class="fas fa-home"></i> Address</label>
                             <textarea id="custAddress" name="address" rows="2" placeholder="Full address"></textarea>
@@ -776,6 +977,17 @@ $isAdmin = ($role === 'admin');
                             <select id="custReferredBy" name="referred_by" class="searchable">
                                 <option value="">No Referrer</option>
                             </select>
+                        </div>
+                        <div class="form-group" style="grid-column: 1 / -1; background: var(--bg-surface, #f8f9fa); padding: 12px; border-radius: 8px; border: 1px solid var(--border-color, #e0e0e0);">
+                            <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-weight:600; margin:0;">
+                                <input type="checkbox" id="custCreatePortal" name="create_portal_login" value="1" onchange="$('#portalPwdGroup').toggle(this.checked)">
+                                <span><i class="fas fa-key" style="color:var(--navy-accent, #0074D9);"></i> Enable Customer Portal Login (Self &amp; Family Policies)</span>
+                            </label>
+                            <div id="portalPwdGroup" style="display:none; margin-top:10px;">
+                                <label><i class="fas fa-lock"></i> Set Portal Password (min 6 characters)</label>
+                                <input type="password" id="custPortalPassword" name="portal_password" minlength="6" placeholder="Customer portal password">
+                                <small class="help-text">Customer can log in to view and manage all their own &amp; family policies.</small>
+                            </div>
                         </div>
                     </div>
 
@@ -793,6 +1005,87 @@ $isAdmin = ($role === 'admin');
                         <button type="button" class="btn btn-secondary" onclick="closeModal()">
                             <i class="fas fa-times"></i> Cancel
                         </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Portal Login Modal -->
+    <div class="modal-overlay" id="portalModal">
+        <div class="modal modal-sm" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="portalModalTitle"><i class="fas fa-key"></i> Customer Portal Access</h3>
+                <button class="close-btn" onclick="closePortalModal()"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="portalForm">
+                    <input type="hidden" id="portalCustId" name="customer_id">
+                    <p id="portalCustInfo" style="margin-bottom:12px; font-weight:600;"></p>
+                    <div class="form-group">
+                        <label><i class="fas fa-envelope"></i> Login Email</label>
+                        <input type="email" id="portalEmail" name="email" required placeholder="customer@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label><i class="fas fa-phone"></i> Mobile Number</label>
+                        <input type="tel" id="portalPhone" name="phone" required placeholder="10-digit mobile">
+                    </div>
+                    <div class="form-group">
+                        <label><i class="fas fa-lock"></i> Password (min 6 characters)</label>
+                        <input type="password" id="portalPassword" name="password" required minlength="6" placeholder="Enter password for customer">
+                    </div>
+                    <p class="help-text" style="margin-bottom:15px;"><i class="fas fa-info-circle"></i> Customer can log in to view and download all their own and family policies (Motor, Health, Life) and submit claims.</p>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary"><i class="fas fa-check"></i> Save &amp; Grant Access</button>
+                        <button type="button" class="btn btn-secondary" onclick="closePortalModal()"><i class="fas fa-times"></i> Cancel</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Add Family Member Modal -->
+    <div class="modal-overlay" id="familyMemberModal">
+        <div class="modal" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <h3 id="familyModalTitle"><i class="fas fa-user-plus"></i> Add Family Member</h3>
+                <button class="close-btn" onclick="closeFamilyModal()"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="modal-body">
+                <form id="familyMemberForm">
+                    <input type="hidden" id="famHeadCustId" name="head_customer_id">
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label><i class="fas fa-user"></i> Full Name *</label>
+                            <input type="text" id="famMemberName" name="name" required placeholder="Family member name">
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-people-arrows"></i> Relation *</label>
+                            <select id="famMemberRelation" name="family_relation" required class="searchable">
+                                <option value="Spouse">Spouse (Wife / Husband)</option>
+                                <option value="Son">Son</option>
+                                <option value="Daughter">Daughter</option>
+                                <option value="Father">Father</option>
+                                <option value="Mother">Mother</option>
+                                <option value="Other">Other Family Member</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-phone"></i> Mobile (leave blank if same)</label>
+                            <input type="tel" id="famMemberMobile" name="mobile" placeholder="10-15 digits">
+                        </div>
+                        <div class="form-group">
+                            <label><i class="fas fa-birthday-cake"></i> Date of Birth</label>
+                            <input type="date" id="famMemberDob" name="date_of_birth">
+                        </div>
+                        <div class="form-group" style="grid-column: 1 / -1;">
+                            <label><i class="fas fa-envelope"></i> Email (optional)</label>
+                            <input type="email" id="famMemberEmail" name="email" placeholder="Optional email">
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary"><i class="fas fa-plus-circle"></i> Add to Family</button>
+                        <button type="button" class="btn btn-secondary" onclick="closeFamilyModal()"><i class="fas fa-times"></i> Cancel</button>
                     </div>
                 </form>
             </div>
@@ -963,10 +1256,17 @@ $isAdmin = ($role === 'admin');
                     var html = '<div class="action-hub">';
                     html += '<button class="action-icon view-icon" data-act="view" data-id="' + row.id + '" title="View"><i class="fas fa-eye"></i></button>';
                     html += '<button class="action-icon view-icon" data-act="policies" data-id="' + row.id + '" title="Policies"><i class="fas fa-file-contract"></i></button>';
-                    var menu = '<button class="more-item" data-act="whatsapp" data-id="' + row.id + '"><i class="fab fa-whatsapp"></i> WhatsApp</button>';
+                    var menu = '';
+                    if (IS_ADMIN || IS_AGENT) {
+                        menu += '<button class="more-item" data-act="edit" data-id="' + row.id + '"><i class="fas fa-pen"></i> Edit</button>';
+                    }
+                    menu += '<button class="more-item" data-act="family" data-id="' + row.id + '"><i class="fas fa-people-roof"></i> Family Members</button>';
+                    if (IS_ADMIN || IS_AGENT) {
+                        menu += '<button class="more-item" data-act="portal" data-id="' + row.id + '"><i class="fas fa-key"></i> ' + (row.has_portal ? 'Portal Access (Active)' : 'Create Portal Access') + '</button>';
+                    }
+                    menu += '<button class="more-item" data-act="whatsapp" data-id="' + row.id + '"><i class="fab fa-whatsapp"></i> WhatsApp</button>';
                     menu += '<button class="more-item" data-act="email" data-id="' + row.id + '"><i class="fas fa-envelope"></i> Email</button>';
                     if (IS_ADMIN) {
-                        menu = '<button class="more-item" data-act="edit" data-id="' + row.id + '"><i class="fas fa-pen"></i> Edit</button>' + menu;
                         menu += '<div class="more-divider"></div><button class="more-item danger" data-act="delete" data-id="' + row.id + '"><i class="fas fa-trash"></i> Delete</button>';
                     }
                     html += '<div class="more-menu"><button class="more-btn" title="More"><i class="fas fa-ellipsis-v"></i></button>';
@@ -1024,6 +1324,13 @@ $isAdmin = ($role === 'admin');
                 var rec = custData.find(function(c) { return c.id == id; });
                 if (act === 'view') { if (rec) viewRecord(rec); }
                 else if (act === 'policies') { window.location.href = 'policy_entries.php?customer_id=' + id; }
+                else if (act === 'family') {
+                    if (rec) {
+                        viewRecord(rec);
+                        setTimeout(function(){ $('#viewModalBody .tab-btn[data-tab="family"]').trigger('click'); }, 150);
+                    }
+                }
+                else if (act === 'portal') { if (rec) openPortalModal(rec); }
                 else if (act === 'whatsapp') {
                     if (rec) window.open('https://wa.me/' + String(rec.whatsapp_number || rec.mobile).replace(/\D/g, ''), '_blank');
                 }
@@ -1031,7 +1338,7 @@ $isAdmin = ($role === 'admin');
                     if (rec && rec.email && rec.email !== '-') window.location.href = 'mailto:' + rec.email;
                     else Swal.fire({ icon: 'info', title: 'No Email', text: 'This customer has no email on file.' });
                 }
-                else if (act === 'edit' && IS_ADMIN) { if (rec) editCustomer(rec); }
+                else if (act === 'edit' && (IS_ADMIN || IS_AGENT)) { if (rec) editCustomer(rec); }
                 else if (act === 'delete' && IS_ADMIN) { deleteCustomer(id); }
             });
             applyFilters();
@@ -1051,7 +1358,7 @@ $isAdmin = ($role === 'admin');
             rsTbClear(custTable);
         }
 
-        // tabbed view modal - profile / policies / vehicles / points
+        // tabbed view modal - profile / family / policies / vehicles / points
         function viewRecord(d) {
             var statusCls = d.is_active ? 'status-active' : 'status-inactive';
 
@@ -1059,6 +1366,8 @@ $isAdmin = ($role === 'admin');
             var profile = '<table class="view-detail-table">';
             profile += '<tr><td class="vd-label"><i class="fas fa-hashtag"></i> ID</td><td class="vd-value">' + d.id + '</td>';
             profile += '<td class="vd-label"><i class="fas fa-user"></i> Name</td><td class="vd-value">' + (escapeHtml(d.name) || '-') + '</td></tr>';
+            profile += '<tr><td class="vd-label"><i class="fas fa-people-roof"></i> Family Relation</td><td class="vd-value"><span class="status-badge status-admin">' + escapeHtml(d.family_relation || 'Self') + '</span>' + (d.family_head_name ? ' (Head: ' + escapeHtml(d.family_head_name) + ')' : '') + '</td>';
+            profile += '<td class="vd-label"><i class="fas fa-key"></i> Portal Access</td><td class="vd-value">' + (d.has_portal ? '<span class="status-badge status-active"><i class="fas fa-check"></i> ' + escapeHtml(d.portal_email || 'Active') + '</span>' : '<span class="status-badge status-inactive">Not Created</span>') + '</td></tr>';
             profile += '<tr><td class="vd-label"><i class="fas fa-phone"></i> Mobile</td><td class="vd-value">' + (escapeHtml(d.mobile) || '-') + '</td>';
             profile += '<td class="vd-label"><i class="fas fa-envelope"></i> Email</td><td class="vd-value">' + (escapeHtml(d.email) || '-') + '</td></tr>';
             profile += '<tr><td class="vd-label"><i class="fas fa-map-marker-alt"></i> State</td><td class="vd-value">' + (escapeHtml(d.state) || '-') + '</td>';
@@ -1078,11 +1387,13 @@ $isAdmin = ($role === 'admin');
 
             var html = '<div class="tab-nav">';
             html += '<button class="tab-btn active" data-tab="profile"><i class="fas fa-id-card"></i> Profile</button>';
+            html += '<button class="tab-btn" data-tab="family"><i class="fas fa-people-roof"></i> Family Group</button>';
             html += '<button class="tab-btn" data-tab="policies"><i class="fas fa-file-contract"></i> Policies</button>';
             html += '<button class="tab-btn" data-tab="vehicles"><i class="fas fa-car"></i> Vehicles</button>';
             html += '<button class="tab-btn" data-tab="points"><i class="fas fa-star"></i> Points/Referral</button>';
             html += '</div>';
             html += '<div class="tab-content active" data-tab="profile">' + profile + '</div>';
+            html += '<div class="tab-content" data-tab="family"><div class="empty-state-text"><i class="fas fa-spinner fa-spin"></i> Loading family...</div></div>';
             html += '<div class="tab-content" data-tab="policies"><div class="empty-state-text"><i class="fas fa-spinner fa-spin"></i> Loading...</div></div>';
             html += '<div class="tab-content" data-tab="vehicles"><div class="empty-state-text"><i class="fas fa-spinner fa-spin"></i> Loading...</div></div>';
             html += '<div class="tab-content" data-tab="points"><div class="empty-state-text"><i class="fas fa-spinner fa-spin"></i> Loading...</div></div>';
@@ -1092,6 +1403,7 @@ $isAdmin = ($role === 'admin');
             document.getElementById('viewModal').classList.add('active');
             initModalTabs('#viewModalBody');
 
+            loadCustomerFamily(d.id);
             loadCustomerPolicies(d.id);
             loadCustomerVehicles(d.id);
             loadCustomerPoints(d.id);
@@ -1173,6 +1485,66 @@ $isAdmin = ($role === 'admin');
             });
         }
 
+        function loadCustomerFamily(cid) {
+            $.getJSON('?action=getFamilyMembers&id=' + cid, function(res) {
+                var pane = tabPane('family');
+                if (!res.success) { pane.html('<div class="empty-state-text">Failed to load family members.</div>'); return; }
+                var html = '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; gap:10px; flex-wrap:wrap;">'
+                         + '<strong style="color:var(--navy-primary); font-size:14px;"><i class="fas fa-people-roof"></i> Family Group &amp; Coverage Portfolio</strong>'
+                         + '<button type="button" class="btn btn-sm btn-primary" onclick="openAddFamilyModal(' + cid + ')"><i class="fas fa-user-plus"></i> Add Family Member</button>'
+                         + '</div><div class="tab-table"></div>';
+                pane.html(html);
+                rsTabTable(pane.find('.tab-table')[0], {
+                    data: res.data, title: 'Family Members', file: 'family_members', empty: 'No family members linked yet',
+                    columns: [
+                        { data: 'name', title: 'Member Name', render: function(d) { return '<strong>' + escapeHtml(d) + '</strong>'; } },
+                        { data: 'relation', title: 'Relation', render: function(d) { return '<span class="status-badge status-admin">' + escapeHtml(d) + '</span>'; } },
+                        { data: 'mobile', title: 'Mobile' },
+                        { data: 'dob', title: 'Date of Birth' },
+                        { data: 'active_policies', title: 'Active Policies', render: function(d) { return '<span class="badge-code">' + d + '</span>'; } },
+                        { data: 'verticals', title: 'Coverages', render: function(d) { return escapeHtml(d); } }
+                    ]
+                });
+            });
+        }
+
+        function populateFamilyHeadDropdown(excludeId) {
+            var sel = $('#custFamilyHead');
+            sel.find('option:not(:first)').remove();
+            custData.forEach(function(c) {
+                if (excludeId && c.id == excludeId) return;
+                sel.append($('<option>').val(c.id).text(c.name + ' (' + c.mobile + ')'));
+            });
+            var el = sel[0];
+            if (el && el.sdRefresh) el.sdRefresh();
+        }
+
+        function openPortalModal(cust) {
+            $('#portalCustId').val(cust.id);
+            $('#portalCustInfo').html('<i class="fas fa-user"></i> Customer: <strong>' + escapeHtml(cust.name) + '</strong> (' + escapeHtml(cust.mobile) + ')');
+            $('#portalEmail').val(cust.email && cust.email !== '-' ? cust.email : '');
+            $('#portalPhone').val(cust.mobile || '');
+            $('#portalPassword').val('');
+            $('#portalModal').addClass('active');
+        }
+
+        function closePortalModal() {
+            $('#portalModal').removeClass('active');
+            $('#portalForm')[0].reset();
+        }
+
+        function openAddFamilyModal(headId) {
+            $('#famHeadCustId').val(headId || '');
+            $('#familyMemberForm')[0].reset();
+            $('#familyMemberModal').addClass('active');
+            document.querySelectorAll('#familyMemberModal select.searchable').forEach(function(s) { if (s.sdRefresh) s.sdRefresh(); });
+        }
+
+        function closeFamilyModal() {
+            $('#familyMemberModal').removeClass('active');
+            $('#familyMemberForm')[0].reset();
+        }
+
         function closeViewModal() {
             document.getElementById('viewModal').classList.remove('active');
         }
@@ -1181,17 +1553,21 @@ $isAdmin = ($role === 'admin');
             if (e.target === this) closeViewModal();
         });
 
-        <?php if ($isAdmin): ?>
+        <?php if ($isAdmin || $role === 'agent' || $role === 'manager' || $role === 'customer'): ?>
         function openAddModal() {
             isEditMode = false;
             $('#modalTitle').html('<i class="fas fa-user-plus"></i> Add Customer');
             $('#customerForm')[0].reset();
             $('#customerId').val('');
             $('#custIsActive').prop('checked', true);
+            $('#custCreatePortal').prop('checked', false);
+            $('#portalPwdGroup').hide();
             $('#statusToggleGroup').hide();
             populateReferralDropdown();
             populateAgentDropdown();
+            populateFamilyHeadDropdown();
             $('#customerModal').addClass('active');
+            document.querySelectorAll('select.searchable').forEach(function(s) { if (s.sdRefresh) s.sdRefresh(); });
         }
 
         function editCustomer(cust) {
@@ -1203,6 +1579,9 @@ $isAdmin = ($role === 'admin');
             $('#custEmail').val(cust.email === '-' ? '' : cust.email);
             $('#custState').val(cust.state === '-' ? '' : cust.state);
             $('#custAddress').val(cust.address || '');
+            $('#custFamilyRelation').val(cust.family_relation || 'Self');
+            populateFamilyHeadDropdown(cust.id);
+            $('#custFamilyHead').val(cust.family_head_id || '');
             populateReferralDropdown(cust.id);
             $('#custReferredBy').val(cust.referred_by || '');
             populateAgentDropdown(cust);
@@ -1213,6 +1592,8 @@ $isAdmin = ($role === 'admin');
             $('#custCity').val(cust.city || '');
             $('#custPincode').val(cust.pincode || '');
             $('#custIsActive').prop('checked', !!cust.is_active);
+            $('#custCreatePortal').prop('checked', !!cust.has_portal);
+            $('#portalPwdGroup').hide();
             $('#statusToggleGroup').show();
             $('#customerModal').addClass('active');
             // refresh searchable display
@@ -1265,6 +1646,59 @@ $isAdmin = ($role === 'admin');
                     hideLoading();
                     Swal.fire({ icon: 'error', title: 'Error', text: 'Connection error: ' + err });
                 }
+            });
+        });
+
+        $('#portalForm').on('submit', function(e) {
+            e.preventDefault();
+            var fd = new FormData(this);
+            fd.append('csrf_token', window.CSRF_TOKEN);
+            showLoading('Saving portal access...');
+            $.ajax({
+                url: '?action=createPortalLogin',
+                method: 'POST',
+                data: fd,
+                processData: false,
+                contentType: false,
+                dataType: 'json',
+                success: function(res) {
+                    hideLoading();
+                    if (res.success) {
+                        Swal.fire({ icon: 'success', title: 'Access Saved', text: res.message });
+                        closePortalModal();
+                        loadCustomers();
+                    } else {
+                        Swal.fire('Error', res.message, 'error');
+                    }
+                },
+                error: function(xhr, s, err) { hideLoading(); Swal.fire('Error', 'Connection error: ' + err, 'error'); }
+            });
+        });
+
+        $('#familyMemberForm').on('submit', function(e) {
+            e.preventDefault();
+            var fd = new FormData(this);
+            fd.append('csrf_token', window.CSRF_TOKEN);
+            showLoading('Adding family member...');
+            $.ajax({
+                url: '?action=addFamilyMember',
+                method: 'POST',
+                data: fd,
+                processData: false,
+                contentType: false,
+                dataType: 'json',
+                success: function(res) {
+                    hideLoading();
+                    if (res.success) {
+                        Swal.fire({ icon: 'success', title: 'Family Member Added', text: res.message });
+                        closeFamilyModal();
+                        loadCustomers();
+                        loadCustomersList();
+                    } else {
+                        Swal.fire('Error', res.message, 'error');
+                    }
+                },
+                error: function(xhr, s, err) { hideLoading(); Swal.fire('Error', 'Connection error: ' + err, 'error'); }
             });
         });
 

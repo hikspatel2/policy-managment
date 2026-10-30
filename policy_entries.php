@@ -23,8 +23,9 @@ $current_page = 'policies';
 $isAdmin = ($role === 'admin');
 $isManager = ($role === 'manager');
 $isAgent = ($role === 'agent');
-$canCreate = ($isAdmin || $isManager);
-$canEdit = $isAdmin;
+$isCustomer = ($role === 'customer');
+$canCreate = ($isAdmin || $isManager || $isAgent);
+$canEdit = ($isAdmin || $isAgent);
 $canDelete = $isAdmin;
 
 // commission calc - single source of truth for server side
@@ -386,7 +387,13 @@ if (isset($_GET['action'])) {
                 while ($r = $res->fetch_assoc()) $out['branches'][] = $r;
                 $stmt->close();
 
-                $stmt = $conn->prepare("SELECT a.id, a.agent_code, a.name FROM agents a WHERE a.is_active=1 ORDER BY a.name");
+                if ($isAgent) {
+                    $myAgentId = agentIdForUser($conn, $user_id) ?? 0;
+                    $stmt = $conn->prepare("SELECT a.id, a.agent_code, a.name FROM agents a WHERE a.id = ?");
+                    $stmt->bind_param("i", $myAgentId);
+                } else {
+                    $stmt = $conn->prepare("SELECT a.id, a.agent_code, a.name FROM agents a WHERE a.is_active=1 ORDER BY a.name");
+                }
                 $stmt->execute();
                 $res = $stmt->get_result();
                 $out['agents'] = [];
@@ -400,7 +407,13 @@ if (isset($_GET['action'])) {
                 while ($r = $res->fetch_assoc()) $out['buyers'][] = $r;
                 $stmt->close();
 
-                $stmt = $conn->prepare("SELECT id, name, mobile FROM customers WHERE is_active=1 ORDER BY name");
+                if ($isAgent) {
+                    $myAgentId = agentIdForUser($conn, $user_id) ?? 0;
+                    $stmt = $conn->prepare("SELECT id, name, mobile FROM customers WHERE is_active=1 AND (agent_id = ? OR agent_id IS NULL) ORDER BY name");
+                    $stmt->bind_param("i", $myAgentId);
+                } else {
+                    $stmt = $conn->prepare("SELECT id, name, mobile FROM customers WHERE is_active=1 ORDER BY name");
+                }
                 $stmt->execute();
                 $res = $stmt->get_result();
                 $out['customers'] = [];
@@ -453,6 +466,13 @@ if (isset($_GET['action'])) {
                     $where[] = "pe.agent_id = (SELECT a.id FROM agents a WHERE a.user_id = ?)";
                     $types .= 'i';
                     $params[] = $user_id;
+                } elseif ($isCustomer) {
+                    $cid = customerIdForUser($conn, $user_id);
+                    if (!$cid && !empty($_SESSION['customer_id'])) $cid = (int)$_SESSION['customer_id'];
+                    $famIds = $cid ? getFamilyCustomerIds($conn, $cid) : [0];
+                    if (empty($famIds)) $famIds = [0];
+                    $inCust = implode(',', array_map('intval', $famIds));
+                    $where[] = "pe.customer_id IN ($inCust)";
                 }
                 if ($fCustomerId > 0) { $where[] = "pe.customer_id = ?"; $types .= 'i'; $params[] = $fCustomerId; }
                 if ($fVehicleId > 0)  { $where[] = "pe.vehicle_id = ?";  $types .= 'i'; $params[] = $fVehicleId; }
@@ -479,6 +499,18 @@ if (isset($_GET['action'])) {
                     $row['payment_in'] = (float)($row['payment_in'] ?? 0);
                     $row['payment_out'] = (float)($row['payment_out'] ?? 0);
                     $row['gst_amount'] = (float)($row['gst_amount'] ?? 0);
+                    if ($isCustomer) {
+                        $row['buyer_commission_basis'] = '';
+                        $row['buyer_commission_rate'] = 0;
+                        $row['buyer_commission_amount'] = 0;
+                        $row['agent_commission_basis'] = '';
+                        $row['agent_commission_rate'] = 0;
+                        $row['agent_commission_amount'] = 0;
+                        $row['payment_out'] = 0;
+                        $row['company_code'] = '';
+                        $row['buyer_id'] = 0;
+                        $row['is_personal'] = ($row['customer_id'] == $cid);
+                    }
                     $policies[] = $row;
                 }
                 $stmt->close();
@@ -509,6 +541,15 @@ if (isset($_GET['action'])) {
                     $sql .= " AND pe.agent_id = (SELECT a.id FROM agents a WHERE a.user_id = ?)";
                     $stmt = $conn->prepare($sql);
                     $stmt->bind_param("ii", $pid, $user_id);
+                } elseif ($isCustomer) {
+                    $cid = customerIdForUser($conn, $user_id);
+                    if (!$cid && !empty($_SESSION['customer_id'])) $cid = (int)$_SESSION['customer_id'];
+                    $famIds = $cid ? getFamilyCustomerIds($conn, $cid) : [0];
+                    if (empty($famIds)) $famIds = [0];
+                    $inCust = implode(',', array_map('intval', $famIds));
+                    $sql .= " AND pe.customer_id IN ($inCust)";
+                    $stmt = $conn->prepare($sql);
+                    $stmt->bind_param("i", $pid);
                 } else {
                     $stmt = $conn->prepare($sql);
                     $stmt->bind_param("i", $pid);
@@ -525,6 +566,20 @@ if (isset($_GET['action'])) {
                 }
 
                 $row['id'] = (int)$row['id'];
+                if ($isCustomer) {
+                    $row['buyer_commission_basis'] = '';
+                    $row['buyer_commission_rate'] = 0;
+                    $row['buyer_commission_amount'] = 0;
+                    $row['agent_commission_basis'] = '';
+                    $row['agent_commission_rate'] = 0;
+                    $row['agent_commission_amount'] = 0;
+                    $row['payment_out'] = 0;
+                    $row['company_code'] = '';
+                    $row['buyer_id'] = 0;
+                    $row['buyer_name'] = '';
+                    $row['payment_out_bank_account_id'] = 0;
+                    $row['payment_out_bank_name'] = '';
+                }
                 $conn->close();
                 echo json_encode(['success' => true, 'data' => $row]);
                 exit();
@@ -564,6 +619,12 @@ if (isset($_GET['action'])) {
 
                 // optional
                 $agentId = !empty($_POST['agent_id']) ? (int)$_POST['agent_id'] : null;
+                if ($isAgent) {
+                    $myAgentId = agentIdForUser($conn, $user_id);
+                    if ($myAgentId) {
+                        $agentId = (int)$myAgentId;
+                    }
+                }
                 $agentBasis = !empty($_POST['agent_commission_basis']) ? trim($_POST['agent_commission_basis']) : null;
                 $agentRate = !empty($_POST['agent_commission_rate']) ? (float)$_POST['agent_commission_rate'] : null;
                 $agentCommAmt = (float)($_POST['agent_commission_amount'] ?? 0);
@@ -872,6 +933,19 @@ if (isset($_GET['action'])) {
                 $status = trim($_POST['status'] ?? 'active');
 
                 $agentId = !empty($_POST['agent_id']) ? (int)$_POST['agent_id'] : null;
+                if ($isAgent) {
+                    $myAgentId = agentIdForUser($conn, $user_id);
+                    $chk = $conn->prepare("SELECT agent_id FROM policy_entries WHERE id = ?");
+                    $chk->bind_param("i", $pid);
+                    $chk->execute();
+                    $polRow = $chk->get_result()->fetch_assoc();
+                    $chk->close();
+                    if (!$polRow || (int)$polRow['agent_id'] !== (int)$myAgentId) {
+                        echo json_encode(['success' => false, 'message' => 'Access denied: You can only edit your own policies']);
+                        exit();
+                    }
+                    $agentId = (int)$myAgentId;
+                }
                 $agentBasis = !empty($_POST['agent_commission_basis']) ? trim($_POST['agent_commission_basis']) : null;
                 $agentRate = !empty($_POST['agent_commission_rate']) ? (float)$_POST['agent_commission_rate'] : null;
                 $agentCommAmt = (float)($_POST['agent_commission_amount'] ?? 0);
@@ -1988,17 +2062,17 @@ if ($isAdmin) {
         <div class="main-content">
             <?php
             $pageIcon    = 'fa-file-shield';
-            $pageTitle   = 'Policy Entries';
+            $pageTitle   = $isCustomer ? 'My & Family Policies' : 'Policy Entries';
             $crumbs      = [];
             $pageActions = [];
-            if ($canCreate) {
+            if ($canCreate && !$isCustomer) {
                 $pageActions[] = ['label' => 'Add Policy', 'icon' => 'fa-plus', 'onclick' => 'openAddModal()', 'class' => 'primary'];
                 $pageActions[] = ['label' => 'Bulk Upload', 'icon' => 'fa-file-excel', 'onclick' => 'openUploadModal()'];
             }
-            $pageActions[] = ['label' => 'CSV (All Details)', 'icon' => 'fa-file-csv', 'onclick' => "dtBtn(policiesTable,'csv')"];
+            $pageActions[] = ['label' => 'CSV', 'icon' => 'fa-file-csv', 'onclick' => "dtBtn(policiesTable,'csv')"];
             $pageActions[] = ['label' => 'PDF',     'icon' => 'fa-file-pdf', 'onclick' => "dtBtn(policiesTable,'pdf')"];
             $pageActions[] = ['label' => 'Print',   'icon' => 'fa-print',    'onclick' => "dtBtn(policiesTable,'print')"];
-            if ($canDelete) $pageActions[] = ['label' => 'Trash', 'icon' => 'fa-trash-can-arrow-up', 'onclick' => 'openTrash()'];
+            if ($canDelete && !$isCustomer) $pageActions[] = ['label' => 'Trash', 'icon' => 'fa-trash-can-arrow-up', 'onclick' => 'openTrash()'];
             $pageActions[] = ['label' => 'Refresh', 'icon' => 'fa-rotate',   'onclick' => 'loadPolicies()'];
             include 'page_header.php';
             ?>
@@ -2022,6 +2096,16 @@ if ($isAdmin) {
                         <option value="cancelled">Cancelled</option>
                     </select>
                 </div>
+                <?php if ($isCustomer): ?>
+                <div class="hf-field" title="Scope"><label for="filterScope"><i class="fas fa-users"></i></label>
+                    <select id="filterScope" class="searchable">
+                        <option value="">All (Self &amp; Family)</option>
+                        <option value="self">My Policies (Self)</option>
+                        <option value="family">Family Members</option>
+                    </select>
+                </div>
+                <?php endif; ?>
+                <?php if (!$isCustomer): ?>
                 <div class="hf-field" title="Buyer"><label for="filterBuyer"><i class="fas fa-building"></i></label>
                     <select id="filterBuyer" class="searchable">
                         <option value="">All Buyers</option>
@@ -2032,7 +2116,8 @@ if ($isAdmin) {
                         <option value="">All Branches</option>
                     </select>
                 </div>
-                <?php if (!$isAgent): ?>
+                <?php endif; ?>
+                <?php if (!$isAgent && !$isCustomer): ?>
                 <div class="hf-field" title="Agent"><label for="filterAgent"><i class="fas fa-user-tie"></i></label>
                     <select id="filterAgent" class="searchable">
                         <option value="">All Agents</option>
@@ -2590,12 +2675,13 @@ if ($isAdmin) {
     /** Developed by Rudees Digital */
     const IS_ADMIN = <?php echo $isAdmin ? 'true' : 'false'; ?>;
     const IS_AGENT = <?php echo $isAgent ? 'true' : 'false'; ?>;
-    const CAN_CREATE = <?php echo $canCreate ? 'true' : 'false'; ?>;
+    const IS_CUSTOMER = <?php echo $isCustomer ? 'true' : 'false'; ?>;
+    const CAN_CREATE = <?php echo ($canCreate && !$isCustomer) ? 'true' : 'false'; ?>;
     var POLICY_TYPE_LBL = { comprehensive: 'Comprehensive', third_party: 'Third Party', own_damage: 'Own Damage' };
     var POLICY_TYPE_SHORT = { comprehensive: 'Comp', third_party: 'TP', own_damage: 'OD' };
     var BUSINESS_TYPE_LBL = { 'new': 'New', renewal: 'Renewal', rollover: 'Rollover' };
-    const CAN_EDIT = <?php echo $canEdit ? 'true' : 'false'; ?>;
-    const CAN_DELETE = <?php echo $canDelete ? 'true' : 'false'; ?>;
+    const CAN_EDIT = <?php echo ($canEdit && !$isCustomer) ? 'true' : 'false'; ?>;
+    const CAN_DELETE = <?php echo ($canDelete && !$isCustomer) ? 'true' : 'false'; ?>;
 
     let policiesTable = null;
     let policiesData = [];
@@ -2829,123 +2915,145 @@ if ($isAdmin) {
 
         var basisLbl = {'premium_pct':'Premium %','tp_pct':'TP %','od_pct':'OD %','net_pct':'Net %','fixed':'Fixed'};
 
-        var cols = [
-            {
+        var cols = [];
+        if (!IS_CUSTOMER) {
+            cols.push({
                 data: 'id', title: '<input type="checkbox" class="bulk-check-all">',
                 orderable: false, searchable: false, className: 'bulk-col',
                 render: function(d) { return '<input type="checkbox" class="bulk-check" data-id="' + d + '">'; }
-            },
-            { data: 'id', title: 'ID' },
-            {
-                data: 'insurance_category', title: 'Vertical', name: 'insurance_category',
-                render: function(d, type) {
-                    var cat = (d || 'motor').toLowerCase();
-                    var lbl = cat === 'health' ? 'Health' : (cat === 'life' ? 'Life' : 'Motor');
-                    var chip = cat === 'health' ? 'chip-emerald' : (cat === 'life' ? 'chip-purple' : 'chip-blue');
-                    var ico = cat === 'health' ? 'fa-heart-pulse' : (cat === 'life' ? 'fa-user-shield' : 'fa-car');
-                    if (type !== 'display') return lbl;
-                    return '<span class="status-badge ' + chip + '"><i class="fas ' + ico + '"></i> ' + lbl + '</span>';
+            });
+        }
+        cols.push({ data: 'id', title: 'ID' });
+        cols.push({
+            data: 'insurance_category', title: 'Vertical', name: 'insurance_category',
+            render: function(d, type) {
+                var cat = (d || 'motor').toLowerCase();
+                var lbl = cat === 'health' ? 'Health' : (cat === 'life' ? 'Life' : 'Motor');
+                var chip = cat === 'health' ? 'chip-emerald' : (cat === 'life' ? 'chip-purple' : 'chip-blue');
+                var ico = cat === 'health' ? 'fa-heart-pulse' : (cat === 'life' ? 'fa-user-shield' : 'fa-car');
+                if (type !== 'display') return lbl;
+                return '<span class="status-badge ' + chip + '"><i class="fas ' + ico + '"></i> ' + lbl + '</span>';
+            }
+        });
+        cols.push({ data: 'entry_date', title: 'Date' });
+        cols.push({
+            data: 'policy_number', title: 'Policy#',
+            render: function(d) { return '<span class="badge-code">' + escapeHtml(d) + '</span>'; }
+        });
+        cols.push({ data: 'business_type', title: 'Business Type', visible: false, render: function(d){ return BUSINESS_TYPE_LBL[d] || '-'; } });
+        cols.push({ data: 'proposal_number', title: 'Proposal#', visible: false, render: function(d){ return d ? escapeHtml(d) : '-'; } });
+        cols.push({
+            data: 'vehicle_number', title: 'Vehicle / Plan',
+            render: function(d, type, row) {
+                if (row && row.insurance_category === 'health') {
+                    var pName = row.plan_name || 'Health Plan';
+                    var si = row.sum_insured ? ' (' + fmtAmt(row.sum_insured) + ')' : '';
+                    return '<span class="badge-code" title="Sum Insured: ' + (row.sum_insured ? fmtAmt(row.sum_insured) : '-') + '"><i class="fas fa-heart-pulse"></i> ' + escapeHtml(pName + si) + '</span>';
+                } else if (row && row.insurance_category === 'life') {
+                    var lType = (row.life_plan_type || 'Life').toUpperCase();
+                    var sa = row.sum_assured ? ' (' + fmtAmt(row.sum_assured) + ')' : '';
+                    return '<span class="badge-code" title="Sum Assured: ' + (row.sum_assured ? fmtAmt(row.sum_assured) : '-') + '"><i class="fas fa-user-shield"></i> ' + escapeHtml(lType + sa) + '</span>';
                 }
-            },
-            { data: 'entry_date', title: 'Date' },
-            {
-                data: 'policy_number', title: 'Policy#',
-                render: function(d) { return '<span class="badge-code">' + escapeHtml(d) + '</span>'; }
-            },
-            { data: 'business_type', title: 'Business Type', visible: false, render: function(d){ return BUSINESS_TYPE_LBL[d] || '-'; } },
-            { data: 'proposal_number', title: 'Proposal#', visible: false, render: function(d){ return d ? escapeHtml(d) : '-'; } },
-            {
-                data: 'vehicle_number', title: 'Vehicle / Plan',
-                render: function(d, type, row) {
-                    if (row && row.insurance_category === 'health') {
-                        var pName = row.plan_name || 'Health Plan';
-                        var si = row.sum_insured ? ' (' + fmtAmt(row.sum_insured) + ')' : '';
-                        return '<span class="badge-code" title="Sum Insured: ' + (row.sum_insured ? fmtAmt(row.sum_insured) : '-') + '"><i class="fas fa-heart-pulse"></i> ' + escapeHtml(pName + si) + '</span>';
-                    } else if (row && row.insurance_category === 'life') {
-                        var lType = (row.life_plan_type || 'Life').toUpperCase();
-                        var sa = row.sum_assured ? ' (' + fmtAmt(row.sum_assured) + ')' : '';
-                        return '<span class="badge-code" title="Sum Assured: ' + (row.sum_assured ? fmtAmt(row.sum_assured) : '-') + '"><i class="fas fa-user-shield"></i> ' + escapeHtml(lType + sa) + '</span>';
-                    }
-                    return d ? escapeHtml(d) : '-';
+                return d ? escapeHtml(d) : '-';
+            }
+        });
+        cols.push({ data: 'vehicle_type', title: 'Category', visible: false, render: function(d){ return escapeHtml(d); } });
+        cols.push({
+            data: 'customer_name', title: IS_CUSTOMER ? 'Insured Member' : 'Customer',
+            render: function(d, type, row){
+                var name = escapeHtml(d);
+                if (IS_CUSTOMER && row) {
+                    var badge = row.is_personal ? '<span class="status-badge status-active" style="font-size:10px;margin-left:5px;padding:2px 6px;">Self</span>' : '<span class="status-badge status-user" style="font-size:10px;margin-left:5px;padding:2px 6px;">Family</span>';
+                    return name + badge;
                 }
-            },
-            { data: 'vehicle_type', title: 'Category', visible: false, render: function(d){ return escapeHtml(d); } },
-            { data: 'customer_name', title: 'Customer', render: function(d){ return escapeHtml(d); } },
-            { data: 'company_name', title: 'Company', name: 'company_name', render: function(d){ return escapeHtml(d); } },
-            { data: 'company_code', title: 'Company Code', visible: false, render: function(d){ return escapeHtml(d); } },
-            { data: 'branch_name', title: 'Branch', name: 'branch_name', visible: false, render: function(d){ return d?escapeHtml(d):'-'; } },
-            {
-                data: 'total_premium_amount', title: 'Premium',
-                render: function(d) {
-                    var cls = d > 0 ? 'wallet-positive' : 'wallet-zero';
-                    return '<span class="wallet-amount ' + cls + '">' + fmtAmt(d) + '</span>';
-                }
-            },
-            { data: 'tp_amount', title: 'TP Amount', visible: false, render: function(d){ return fmtAmt(d); } },
-            { data: 'od_amount', title: 'OD Amount', visible: false, render: function(d){ return fmtAmt(d); } },
-            { data: 'net_premium_amount', title: 'Net Premium', visible: false, render: function(d){ return fmtAmt(d); } },
-            { data: 'gst_amount', title: 'GST', visible: false, render: function(d){ return fmtAmt(d); } },
-            { data: 'idv', title: 'IDV', visible: false, render: function(d){ return d === null || d === '' ? '-' : fmtAmt(d); } },
-            { data: 'ncb_percent', title: 'NCB %', visible: false, render: function(d){ return d === null || d === '' ? '-' : (+d) + '%'; } },
-            { data: 'buyer_commission_basis', title: 'Buyer Comm Basis', visible: false, render: function(d){ return basisLbl[d]||d||'-'; } },
-            { data: 'buyer_commission_rate', title: 'Buyer Comm Rate', visible: false },
-            {
+                return name;
+            }
+        });
+        cols.push({ data: 'company_name', title: 'Insurer', name: 'company_name', render: function(d){ return escapeHtml(d); } });
+        if (!IS_CUSTOMER) {
+            cols.push({ data: 'company_code', title: 'Company Code', visible: false, render: function(d){ return escapeHtml(d); } });
+            cols.push({ data: 'branch_name', title: 'Branch', name: 'branch_name', visible: false, render: function(d){ return d?escapeHtml(d):'-'; } });
+        }
+        cols.push({
+            data: 'total_premium_amount', title: 'Premium',
+            render: function(d) {
+                var cls = d > 0 ? 'wallet-positive' : 'wallet-zero';
+                return '<span class="wallet-amount ' + cls + '">' + fmtAmt(d) + '</span>';
+            }
+        });
+        cols.push({ data: 'tp_amount', title: 'TP Amount', visible: false, render: function(d){ return fmtAmt(d); } });
+        cols.push({ data: 'od_amount', title: 'OD Amount', visible: false, render: function(d){ return fmtAmt(d); } });
+        cols.push({ data: 'net_premium_amount', title: 'Net Premium', visible: false, render: function(d){ return fmtAmt(d); } });
+        cols.push({ data: 'gst_amount', title: 'GST', visible: false, render: function(d){ return fmtAmt(d); } });
+        cols.push({ data: 'idv', title: 'IDV', visible: false, render: function(d){ return d === null || d === '' ? '-' : fmtAmt(d); } });
+        cols.push({ data: 'ncb_percent', title: 'NCB %', visible: false, render: function(d){ return d === null || d === '' ? '-' : (+d) + '%'; } });
+
+        if (!IS_CUSTOMER) {
+            cols.push({ data: 'buyer_commission_basis', title: 'Buyer Comm Basis', visible: false, render: function(d){ return basisLbl[d]||d||'-'; } });
+            cols.push({ data: 'buyer_commission_rate', title: 'Buyer Comm Rate', visible: false });
+            cols.push({
                 data: 'buyer_commission_amount', title: 'Buyer Comm',
                 render: function(d){ return '<span class="wallet-amount wallet-positive">' + fmtAmt(d) + '</span>'; }
-            },
-            {
+            });
+            cols.push({
                 data: 'agent_name', title: 'Agent', name: 'agent_name',
                 render: function(d) { return d ? escapeHtml(d) : '<span class="text-muted">Direct</span>'; }
-            },
-            {
+            });
+            cols.push({
                 data: 'agent_commission_amount', title: 'Agent Comm',
                 render: function(d){ return '<span class="wallet-amount wallet-positive">' + fmtAmt(d) + '</span>'; }
-            },
-            { data: 'payment_mode', title: 'Payment Mode', visible: false, render: function(d){ return d?escapeHtml(d):'-'; } },
-            { data: 'bank_name', title: 'Bank', visible: false, render: function(d){ return d?escapeHtml(d):'-'; } },
-            { data: 'payment_in', title: 'Payment In', visible: false, render: function(d){ return fmtAmt(d); } },
-            { data: 'payment_out', title: 'Payment Out', visible: false, render: function(d){ return fmtAmt(d); } },
-            { data: 'policy_start_date', title: 'Start Date', visible: false },
-            { data: 'policy_end_date', title: 'Expiry Date' },
-            {
-                // native col - sorts on days, not on markup
-                title: 'Days to Expiry', field: '_days', minWidth: 60, download: false,
-                sorter: function(a, b, ra, rb) { return daysSort(ra.getData()) - daysSort(rb.getData()); },
-                formatter: function(cell) {
-                    var row = cell.getRow().getData(), n = daysToExpiry(row.policy_end_date);
-                    if (n === null) return '-';
-                    if (row.status === 'cancelled') return '<span class="text-muted">-</span>';
-                    if (n < 0) return '<span class="wallet-amount wallet-negative">Expired ' + Math.abs(n) + 'd</span>';
-                    if (n <= 30) return '<span class="wallet-amount wallet-negative">' + n + ' days</span>';
-                    return '<span class="wallet-amount wallet-positive">' + n + ' days</span>';
-                }
-            },
-            {
-                data: 'status', title: 'Status', name: 'status',
-                render: function(d) {
-                    var s = escapeHtml(d || '');
-                    return '<span class="policy-status status-' + s + '">' + (s ? s.charAt(0).toUpperCase() + s.slice(1) : '') + '</span>';
-                }
-            },
-            {
-                data: 'policy_type', title: 'Type', name: 'policy_type',
-                render: function(d, type) {
-                    var l = POLICY_TYPE_LBL[d] || '';
-                    if (type !== 'display') return l;
-                    return l ? '<span class="status-badge status-user" title="' + l + '">' + POLICY_TYPE_SHORT[d] + '</span>' : '<span class="text-muted">-</span>';
-                }
-            },
-            { data: 'cancellation_reason', title: 'Cancellation Reason', visible: false, render: function(d){ return d ? escapeHtml(d) : '-'; } },
-            { data: 'remarks', title: 'Remarks', visible: false, render: function(d){ return escapeHtml(d); } },
-            { data: 'created_at', title: 'Added On' },
-            {
-                // native col - 3 buttons need more than the kit's 104px
-                title: 'Actions', field: '_act', headerSort: false, download: false, responsive: 0, minWidth: 140,
-                hozAlign: 'right', headerHozAlign: 'right', resizable: false, widthGrow: 0,
-                formatter: function(cell) {
-                    var id = cell.getRow().getData().id;
-                    var h = '<div class="action-hub">';
-                    h += '<button class="action-icon view-icon" data-act="view" data-id="' + id + '" title="View"><i class="fas fa-eye"></i></button>';
+            });
+            cols.push({ data: 'payment_mode', title: 'Payment Mode', visible: false, render: function(d){ return d?escapeHtml(d):'-'; } });
+            cols.push({ data: 'bank_name', title: 'Bank', visible: false, render: function(d){ return d?escapeHtml(d):'-'; } });
+            cols.push({ data: 'payment_in', title: 'Payment In', visible: false, render: function(d){ return fmtAmt(d); } });
+            cols.push({ data: 'payment_out', title: 'Payment Out', visible: false, render: function(d){ return fmtAmt(d); } });
+        }
+        cols.push({ data: 'policy_start_date', title: 'Start Date', visible: false });
+        cols.push({ data: 'policy_end_date', title: 'Expiry Date' });
+        cols.push({
+            title: 'Days to Expiry', field: '_days', minWidth: 60, download: false,
+            sorter: function(a, b, ra, rb) { return daysSort(ra.getData()) - daysSort(rb.getData()); },
+            formatter: function(cell) {
+                var row = cell.getRow().getData(), n = daysToExpiry(row.policy_end_date);
+                if (n === null) return '-';
+                if (row.status === 'cancelled') return '<span class="text-muted">-</span>';
+                if (n < 0) return '<span class="wallet-amount wallet-negative">Expired ' + Math.abs(n) + 'd</span>';
+                if (n <= 30) return '<span class="wallet-amount wallet-negative">' + n + ' days</span>';
+                return '<span class="wallet-amount wallet-positive">' + n + ' days</span>';
+            }
+        });
+        cols.push({
+            data: 'status', title: 'Status', name: 'status',
+            render: function(d) {
+                var s = escapeHtml(d || '');
+                return '<span class="policy-status status-' + s + '">' + (s ? s.charAt(0).toUpperCase() + s.slice(1) : '') + '</span>';
+            }
+        });
+        cols.push({
+            data: 'policy_type', title: 'Type', name: 'policy_type',
+            render: function(d, type) {
+                var l = POLICY_TYPE_LBL[d] || '';
+                if (type !== 'display') return l;
+                return l ? '<span class="status-badge status-user" title="' + l + '">' + POLICY_TYPE_SHORT[d] + '</span>' : '<span class="text-muted">-</span>';
+            }
+        });
+        cols.push({ data: 'cancellation_reason', title: 'Cancellation Reason', visible: false, render: function(d){ return d ? escapeHtml(d) : '-'; } });
+        cols.push({ data: 'remarks', title: 'Remarks', visible: false, render: function(d){ return escapeHtml(d); } });
+        cols.push({ data: 'created_at', title: 'Added On' });
+        cols.push({
+            title: 'Actions', field: '_act', headerSort: false, download: false, responsive: 0, minWidth: IS_CUSTOMER ? 120 : 140,
+            hozAlign: 'right', headerHozAlign: 'right', resizable: false, widthGrow: 0,
+            formatter: function(cell) {
+                var r = cell.getRow().getData();
+                var id = r.id;
+                var h = '<div class="action-hub">';
+                h += '<button class="action-icon view-icon" data-act="view" data-id="' + id + '" title="View Policy Details"><i class="fas fa-eye"></i></button>';
+                if (IS_CUSTOMER) {
+                    h += '<button class="action-icon print-icon" data-act="pdf" data-id="' + id + '" title="Download Policy PDF"><i class="fas fa-file-pdf"></i></button>';
+                    if (r.status === 'active') {
+                        h += '<a class="action-icon" href="claims.php?new=1&policy_id=' + id + '" title="File Claim" style="color:var(--danger,#dc2626);"><i class="fas fa-car-burst"></i></a>';
+                    }
+                } else {
                     if (CAN_CREATE) {
                         h += '<button class="action-icon edit-icon" data-act="renew" data-id="' + id + '" title="Renew"><i class="fas fa-redo"></i></button>';
                     }
@@ -2963,25 +3071,30 @@ if ($isAdmin) {
                         h += '<div class="more-divider"></div>';
                         h += '<button class="more-item danger" data-act="delete" data-id="' + id + '"><i class="fas fa-trash"></i> Delete</button>';
                     }
-                    h += '</div></div></div>';
-                    return h;
+                    h += '</div></div>';
                 }
+                h += '</div>';
+                return h;
             }
-        ];
+        });
 
         policiesTable = rsTable('#policiesTable', {
-            columns: cols, data: data, title: 'Policy Entries', file: 'policy_entries', sort: ['id', 'desc'],
+            columns: cols, data: data, title: IS_CUSTOMER ? 'My & Family Policies' : 'Policy Entries', file: 'policy_entries', sort: ['id', 'desc'],
             rowClass: policyRowClass, empty: 'No policies match the current filters',
             info: function() {
-                var f = [['From', $('#filterDateFrom').val()], ['To', $('#filterDateTo').val()], ['Status', $('#filterStatus').val()],
-                    ['Buyer', $('#filterBuyer').val()], ['Branch', $('#filterBranch').val()]];
-                if (!IS_AGENT) f.push(['Agent', $('#filterAgent').val()]);
+                var f = [['From', $('#filterDateFrom').val()], ['To', $('#filterDateTo').val()], ['Status', $('#filterStatus').val()]];
+                if (!IS_CUSTOMER) {
+                    f.push(['Buyer', $('#filterBuyer').val()], ['Branch', $('#filterBranch').val()]);
+                    if (!IS_AGENT) f.push(['Agent', $('#filterAgent').val()]);
+                } else {
+                    f.push(['Scope', $('#filterScope').val()]);
+                }
                 return f.filter(function(x) { return x[1]; });
             }
         });
 
-        $('#filterDateFrom, #filterDateTo, #filterCategory, #filterStatus, #filterBuyer, #filterBranch').off('change').on('change', applyFilters);
-        if (!IS_AGENT) $('#filterAgent').off('change').on('change', applyFilters);
+        $('#filterDateFrom, #filterDateTo, #filterCategory, #filterStatus, #filterBuyer, #filterBranch, #filterScope').off('change').on('change', applyFilters);
+        if (!IS_AGENT && !IS_CUSTOMER) $('#filterAgent').off('change').on('change', applyFilters);
 
         setupBulkSelect();
         applyDrillDownFilters();
@@ -3003,7 +3116,7 @@ if ($isAdmin) {
     function applyFilters() {
         if (!policiesTable) return;
         var dateFrom = $('#filterDateFrom').val(), dateTo = $('#filterDateTo').val(), category = $('#filterCategory').val(), status = $('#filterStatus').val();
-        var buyer = $('#filterBuyer').val(), branch = $('#filterBranch').val(), agent = !IS_AGENT ? $('#filterAgent').val() : '';
+        var buyer = $('#filterBuyer').val(), branch = $('#filterBranch').val(), agent = (!IS_AGENT && !IS_CUSTOMER) ? $('#filterAgent').val() : '';
         var lo = dateFrom ? new Date(dateFrom) : null, hi = dateTo ? new Date(dateTo + 'T23:59:59') : null;
 
         // date range on entry_date
@@ -3022,15 +3135,21 @@ if ($isAdmin) {
         rsTbWhere(policiesTable, 'buyer', buyer ? function(r) { return r.company_name === buyer; } : null);
         rsTbWhere(policiesTable, 'branch', branch ? function(r) { return r.branch_name === branch; } : null);
         rsTbWhere(policiesTable, 'agent', agent ? function(r) { return r.agent_name === agent; } : null);
+        if (IS_CUSTOMER) {
+            var scope = $('#filterScope').val();
+            rsTbWhere(policiesTable, 'scope', scope ? function(r) {
+                return scope === 'self' ? !!r.is_personal : !r.is_personal;
+            } : null);
+        }
     }
 
     function clearFilters() {
         $('#filterDateFrom, #filterDateTo, #policySearch').val('');
         $('.hf-seg .is-on').removeClass('is-on');
-        $('#filterCategory, #filterStatus, #filterBuyer, #filterBranch').val('');
-        if (!IS_AGENT) $('#filterAgent').val('');
+        $('#filterCategory, #filterStatus, #filterBuyer, #filterBranch, #filterScope').val('');
+        if (!IS_AGENT && !IS_CUSTOMER) $('#filterAgent').val('');
         // resync searchable dropdown display
-        ['filterCategory', 'filterStatus', 'filterBuyer', 'filterBranch', 'filterAgent'].forEach(function(id) {
+        ['filterCategory', 'filterStatus', 'filterBuyer', 'filterBranch', 'filterAgent', 'filterScope'].forEach(function(id) {
             var el = document.getElementById(id);
             if (el) { el.value = ''; if (el.sdRefresh) el.sdRefresh(); }
         });
@@ -3781,10 +3900,12 @@ if ($isAdmin) {
                 rows.push({ k: 'Policy period', v: rsPaperDate(d.policy_start_date) + ' to ' + rsPaperDate(d.policy_end_date) });
                 rows.push({ k: 'Business type', v: (BUSINESS_TYPE_LBL[d.business_type] || '-') + (d.previous_policy_number ? ' · renewal of ' + d.previous_policy_number : '') });
                 rows.push({ k: 'GST', a: d.gst_amount || 0 });
-                rows.push({ k: 'Buyer commission', v: basis(d.buyer_commission_basis, d.buyer_commission_rate), a: d.buyer_commission_amount });
-                rows.push({ k: 'Agent commission', v: basis(d.agent_commission_basis, d.agent_commission_rate), a: d.agent_commission_amount || 0 });
-                rows.push({ k: 'Payment in', v: [d.payment_in_bank_name, d.payment_mode].filter(Boolean).join(' · ') || '-', a: d.payment_in || 0 });
-                rows.push({ k: 'Payment out', v: d.payment_out_bank_name || '-', a: d.payment_out || 0 });
+                if (!IS_CUSTOMER) {
+                    rows.push({ k: 'Buyer commission', v: basis(d.buyer_commission_basis, d.buyer_commission_rate), a: d.buyer_commission_amount });
+                    rows.push({ k: 'Agent commission', v: basis(d.agent_commission_basis, d.agent_commission_rate), a: d.agent_commission_amount || 0 });
+                    rows.push({ k: 'Payment in', v: [d.payment_in_bank_name, d.payment_mode].filter(Boolean).join(' · ') || '-', a: d.payment_in || 0 });
+                    rows.push({ k: 'Payment out', v: d.payment_out_bank_name || '-', a: d.payment_out || 0 });
+                }
 
                 rsReportExport(kind || 'print', {
                     title: 'Policy Summary', number: d.policy_number,
@@ -3824,9 +3945,13 @@ if ($isAdmin) {
                 }
                 renderViewModal(res.data, focusTab);
                 loadDocuments(id);
-                loadEndorsements(id);
-                loadPolicyClaims(id);
-                loadLedger(id);
+                if (!IS_CUSTOMER) {
+                    loadEndorsements(id);
+                    loadPolicyClaims(id);
+                    loadLedger(id);
+                } else {
+                    loadPolicyClaims(id);
+                }
                 $('#viewModal').addClass('active');
             },
             error: function() { hideLoading(); Swal.fire({ icon: 'error', title: 'Error', text: 'Connection error' }); }
@@ -3854,13 +3979,19 @@ if ($isAdmin) {
         var html = '<div class="tab-nav">';
         html += '<button type="button" class="tab-btn" data-tab="details"><i class="fas fa-file-contract"></i> Policy Details</button>';
         html += '<button type="button" class="tab-btn" data-tab="vehcust">' + tabVehTitle + '</button>';
-        html += '<button type="button" class="tab-btn" data-tab="company"><i class="fas fa-percentage"></i> Company &amp; Commissions</button>';
-        html += '<button type="button" class="tab-btn" data-tab="payment"><i class="fas fa-credit-card"></i> Payments &amp; Bank</button>';
+        if (!IS_CUSTOMER) {
+            html += '<button type="button" class="tab-btn" data-tab="company"><i class="fas fa-percentage"></i> Company &amp; Commissions</button>';
+            html += '<button type="button" class="tab-btn" data-tab="payment"><i class="fas fa-credit-card"></i> Payments &amp; Bank</button>';
+        }
         html += '<button type="button" class="tab-btn" data-tab="documents"><i class="fas fa-folder-open"></i> Documents</button>';
-        html += '<button type="button" class="tab-btn" data-tab="endorse"><i class="fas fa-file-signature"></i> Endorsements</button>';
+        if (!IS_CUSTOMER) {
+            html += '<button type="button" class="tab-btn" data-tab="endorse"><i class="fas fa-file-signature"></i> Endorsements</button>';
+        }
         html += '<button type="button" class="tab-btn" data-tab="claims"><i class="fas fa-car-burst"></i> Claims</button>';
-        html += '<button type="button" class="tab-btn" data-tab="ledger"><i class="fas fa-book"></i> Ledger</button>';
-        html += '<button type="button" class="tab-btn" data-tab="timeline"><i class="fas fa-stream"></i> Timeline</button>';
+        if (!IS_CUSTOMER) {
+            html += '<button type="button" class="tab-btn" data-tab="ledger"><i class="fas fa-book"></i> Ledger</button>';
+            html += '<button type="button" class="tab-btn" data-tab="timeline"><i class="fas fa-stream"></i> Timeline</button>';
+        }
         html += '</div>';
 
         // ---- tab: policy details ----

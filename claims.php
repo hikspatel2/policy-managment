@@ -22,7 +22,8 @@ $current_page = 'claims';
 $isAdmin = $role === 'admin';
 $isStaff = $isAdmin || $role === 'manager';
 $isAgent = $role === 'agent';
-if (!$isStaff && !$isAgent) { header("Location: dashboard.php"); exit(); }
+$isCustomer = $role === 'customer';
+if (!$isStaff && !$isAgent && !$isCustomer) { header("Location: dashboard.php"); exit(); }
 
 const CLM_CATEGORIES = ['motor' => 'Motor', 'health' => 'Health', 'life' => 'Life'];
 const CLM_TYPES = ['own_damage' => 'Own Damage', 'theft' => 'Theft', 'third_party' => 'Third Party', 'total_loss' => 'Total Loss', 'fire' => 'Fire', 'natural_calamity' => 'Natural Calamity', 'other' => 'Other'];
@@ -303,9 +304,18 @@ if (isset($_GET['action'])) {
         switch ($act) {
 
             case 'getClaims':
-                // agent = own book; policy_id / vehicle_id narrow it (policy + vehicle pop-ups)
+                // agent = own book; customer = self & family; policy_id / vehicle_id narrow it (policy + vehicle pop-ups)
                 $w = []; $types = ''; $args = [];
-                if ($isAgent) { $w[] = 'pe.agent_id = ?'; $types .= 'i'; $args[] = agentIdForUser($conn, $user_id) ?? 0; }
+                if ($isAgent) {
+                    $w[] = 'pe.agent_id = ?'; $types .= 'i'; $args[] = agentIdForUser($conn, $user_id) ?? 0;
+                } elseif ($isCustomer) {
+                    $cid = customerIdForUser($conn, $user_id);
+                    if (!$cid && !empty($_SESSION['customer_id'])) $cid = (int)$_SESSION['customer_id'];
+                    $famIds = $cid ? getFamilyCustomerIds($conn, $cid) : [0];
+                    if (empty($famIds)) $famIds = [0];
+                    $inCust = implode(',', array_map('intval', $famIds));
+                    $w[] = "pe.customer_id IN ($inCust)";
+                }
                 foreach (['policy_id' => 'c.policy_entry_id', 'vehicle_id' => 'pe.vehicle_id'] as $k => $col) {
                     $v = (int)($_GET[$k] ?? 0);
                     if ($v > 0) { $w[] = "$col = ?"; $types .= 'i'; $args[] = $v; }
@@ -318,9 +328,21 @@ if (isset($_GET['action'])) {
                 clmOut(['success' => true, 'data' => $rows]);
 
             case 'getPolicyOptions':
-                // claimable policies — cancelled out, agent own only
-                $st = $conn->prepare("SELECT id, policy_number, insurance_category, vehicle_number, plan_name, sum_insured, sum_assured, customer_name, company_name, policy_start_date, policy_end_date, idv
-                    FROM policy_entries WHERE status <> 'cancelled'" . ($isAgent ? ' AND agent_id = ?' : '') . ' ORDER BY policy_end_date DESC, id DESC');
+                // claimable policies — cancelled out, agent own only, customer self+family only
+                $w = ["status <> 'cancelled'"];
+                if ($isAgent) {
+                    $w[] = 'agent_id = ?';
+                } elseif ($isCustomer) {
+                    $cid = customerIdForUser($conn, $user_id);
+                    if (!$cid && !empty($_SESSION['customer_id'])) $cid = (int)$_SESSION['customer_id'];
+                    $famIds = $cid ? getFamilyCustomerIds($conn, $cid) : [0];
+                    if (empty($famIds)) $famIds = [0];
+                    $inCust = implode(',', array_map('intval', $famIds));
+                    $w[] = "customer_id IN ($inCust)";
+                }
+                $sql = "SELECT id, policy_number, insurance_category, vehicle_number, plan_name, sum_insured, sum_assured, customer_name, company_name, policy_start_date, policy_end_date, idv
+                    FROM policy_entries WHERE " . implode(' AND ', $w) . ' ORDER BY policy_end_date DESC, id DESC';
+                $st = $conn->prepare($sql);
                 if ($isAgent) { $aid = agentIdForUser($conn, $user_id) ?? 0; $st->bind_param('i', $aid); }
                 $st->execute();
                 $rows = array_map(function ($r) {
@@ -334,7 +356,11 @@ if (isset($_GET['action'])) {
 
             case 'addClaim':
                 clmPost();
-                // agents intimate only; status + survey fields are staff work
+                $polEntryId = (int)($_POST['policy_entry_id'] ?? 0);
+                if ($isCustomer && !canSeePolicy($conn, $polEntryId)) {
+                    clmOut(['success' => false, 'message' => 'Access denied to this policy']);
+                }
+                // agents & customers intimate only; status + survey fields are staff work
                 $in = $isStaff ? $_POST : array_intersect_key($_POST, array_flip(CLM_AGENT_ADD)) + ['status' => 'intimated'];
                 [$err, $d, $pol] = clmCheck($conn, $in, null, $isAdmin);
                 if ($err) clmOut(['success' => false, 'message' => $err]);
@@ -345,6 +371,7 @@ if (isset($_GET['action'])) {
 
             case 'updateClaim':
                 clmPost();
+                if ($isCustomer) clmOut(['success' => false, 'message' => 'Claim processing is managed by agency administrators']);
                 $old = clmFind($conn, (int)($_POST['id'] ?? 0));
                 if (!$old) clmOut(['success' => false, 'message' => 'Claim not found']);
                 if ($isAgent && $old['status'] !== 'intimated') clmOut(['success' => false, 'message' => 'This claim is already being processed — only staff can change it now']);
@@ -565,9 +592,9 @@ if (isset($_GET['action'])) {
         <div class="main-content">
             <?php
             $pageIcon    = 'fa-car-burst';
-            $pageTitle   = $isAgent ? 'My Claims' : 'Claims';
+            $pageTitle   = $isCustomer ? 'My & Family Claims' : ($isAgent ? 'My Claims' : 'Claims');
             $crumbs      = [];
-            $pageActions = [['label' => 'Add Claim', 'icon' => 'fa-plus', 'onclick' => 'openAddModal()', 'class' => 'primary']];
+            $pageActions = [['label' => $isCustomer ? 'Intimate Claim' : 'Add Claim', 'icon' => 'fa-plus', 'onclick' => 'openAddModal()', 'class' => 'primary']];
             if ($isStaff) $pageActions[] = ['label' => 'Bulk Add / Import', 'icon' => 'fa-file-excel', 'onclick' => 'claimsImport.open()'];
             $pageActions[] = ['label' => 'CSV',   'icon' => 'fa-file-csv', 'onclick' => "dtBtn(claimsTable,'csv')"];
             $pageActions[] = ['label' => 'PDF',   'icon' => 'fa-file-pdf', 'onclick' => "dtBtn(claimsTable,'pdf')"];
@@ -800,7 +827,7 @@ if (isset($_GET['action'])) {
 
     <script>
         /** Developed by Rudees Digital */
-        const IS_ADMIN = <?php echo $isAdmin ? 'true' : 'false'; ?>, IS_STAFF = <?php echo $isStaff ? 'true' : 'false'; ?>, IS_AGENT = <?php echo $isAgent ? 'true' : 'false'; ?>;
+        const IS_ADMIN = <?php echo $isAdmin ? 'true' : 'false'; ?>, IS_STAFF = <?php echo $isStaff ? 'true' : 'false'; ?>, IS_AGENT = <?php echo $isAgent ? 'true' : 'false'; ?>, IS_CUSTOMER = <?php echo $isCustomer ? 'true' : 'false'; ?>;
         const CLM_CATEGORIES = <?php echo json_encode(CLM_CATEGORIES); ?>;
         const CLM_TYPES = <?php echo json_encode(CLM_TYPES); ?>;
         const CLM_HEALTH_TYPES = <?php echo json_encode(CLM_HEALTH_TYPES); ?>;
@@ -830,7 +857,7 @@ if (isset($_GET['action'])) {
         const money = function(v) { return v == null || v === '' ? '—' : (RS_BRAND.sym || '') + Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); };
         const pill = function(s) { return '<span class="status-badge ' + (ST_CLS[s] || 'status-user') + '">' + escapeHtml(CLM_STATUS[s] || s) + '</span>'; };
         const byId = function(id) { return claimsData.find(function(r) { return r.id === +id; }); };
-        const canEdit = function(r) { return IS_STAFF || r.status === 'intimated'; };
+        const canEdit = function(r) { return !IS_CUSTOMER && (IS_STAFF || r.status === 'intimated'); };
         // policy facts from the picker list, else from a claim on it (cancelled policy in edit)
         const polById = function(pid) { pid = +pid; return policyOpts.find(function(p) { return +p.id === pid; }) || claimsData.find(function(r) { return r.policy_entry_id === pid; }); };
         const busy = function($b, on, ico) { $b.prop('disabled', on).find('i').first().attr('class', 'fas ' + (on ? 'fa-spinner fa-spin' : ico)); };
@@ -996,7 +1023,7 @@ if (isset($_GET['action'])) {
                 } }
             );
             claimsTable = rsTable('#claimsTable', {
-                columns: cols, data: claimsData, title: IS_AGENT ? 'My Claims' : 'Claims', file: 'claims', sort: ['intimation_date', 'desc'], bulk: IS_ADMIN,
+                columns: cols, data: claimsData, title: IS_CUSTOMER ? 'My & Family Claims' : (IS_AGENT ? 'My Claims' : 'Claims'), file: 'claims', sort: ['intimation_date', 'desc'], bulk: IS_ADMIN,
                 rowClass: function(r) { return r.status === 'settled' ? 'dt-row-success' : (r.status === 'rejected' || r.status === 'withdrawn' ? 'dt-row-muted' : ''); },
                 info: function() {
                     var f = $('#filterDateFrom').val(), t = $('#filterDateTo').val(), st = STAGES.find(function(s) { return s[0] === curStage; });

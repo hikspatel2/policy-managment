@@ -287,7 +287,6 @@ function vehicleCategoryOptionsHtml($selected = '', $conn = null) {
     return $html;
 }
 
-// bank_accounts: current_balance = opening_balance + Σcredit − Σdebit ; rewrites running_balance per row
 function recalcBankBalance($conn, $bankAccountId) {
     $bankAccountId = (int)$bankAccountId;
     $opening = 0.00;
@@ -686,8 +685,29 @@ function navBadges($userId, $role = '') {
     $key = $userId . '|' . $role;
     if (isset($cache[$key])) return $cache[$key];
     $uid = (int)$userId;
-    $staff = $role !== 'agent';
+    $staff = in_array($role, ['admin', 'manager'], true);
+    $isCustomer = ($role === 'customer');
     $open = "c.status IN ('intimated','survey','approved')"; // claims still waiting on someone
+
+    if ($isCustomer) {
+        $out = ['notif' => 0, 'todo' => 0, 'claims' => 0, 'exp' => 0];
+        try {
+            $conn = getDBConnection();
+            $cid = customerIdForUser($conn, $uid);
+            if (!$cid && !empty($_SESSION['customer_id'])) $cid = (int)$_SESSION['customer_id'];
+            $famIds = $cid ? getFamilyCustomerIds($conn, $cid) : [];
+            if (!empty($famIds)) {
+                $in = implode(',', array_map('intval', $famIds));
+                $res = $conn->query("SELECT COUNT(*) FROM claims c JOIN policy_entries pe ON pe.id = c.policy_entry_id WHERE pe.customer_id IN ($in) AND $open");
+                if ($res) { $r = $res->fetch_row(); $out['claims'] = (int)$r[0]; }
+            }
+            $nRes = $conn->query("SELECT COUNT(*) FROM notifications WHERE user_id = $uid AND is_read = 0");
+            if ($nRes) { $r = $nRes->fetch_row(); $out['notif'] = (int)$r[0]; }
+            $conn->close();
+        } catch (\Throwable $e) {}
+        return $cache[$key] = $out;
+    }
+
     // queues that clear when the work is done — [sql, takes the user id]
     $parts = array_filter([
         'notif' => ["SELECT COUNT(*) FROM notifications WHERE user_id = ? AND is_read = 0", true],
@@ -806,18 +826,99 @@ function agentIdForUser($conn, $uid) {
     return $memo[$uid] = $r ? (int)$r[0] : null;
 }
 
-// staff see every policy, an agent only its own book
+// customer row behind a login (null = staff / unlinked)
+function customerIdForUser($conn, $uid) {
+    static $memo = [];
+    $uid = (int)$uid;
+    if (array_key_exists($uid, $memo)) return $memo[$uid];
+    try {
+        $st = $conn->prepare("SELECT customer_id FROM users WHERE id = ? LIMIT 1");
+        $st->bind_param('i', $uid);
+        $st->execute();
+        $r = $st->get_result()->fetch_row();
+        $st->close();
+        return $memo[$uid] = ($r && !empty($r[0])) ? (int)$r[0] : null;
+    } catch (\Throwable $e) {
+        return $memo[$uid] = null;
+    }
+}
+
+// all customer IDs in the customer's family group (self + linked family members + shared phone)
+function getFamilyCustomerIds($conn, $customerId) {
+    $cid = (int)$customerId;
+    if ($cid <= 0) return [];
+    
+    $ids = [$cid];
+    try {
+        $st = $conn->prepare("SELECT id, mobile, family_head_id FROM customers WHERE id = ? LIMIT 1");
+        $st->bind_param('i', $cid);
+        $st->execute();
+        $cust = $st->get_result()->fetch_assoc();
+        $st->close();
+        
+        if ($cust) {
+            $headId = !empty($cust['family_head_id']) ? (int)$cust['family_head_id'] : $cid;
+            $mobile = trim((string)($cust['mobile'] ?? ''));
+            
+            $ids[] = $headId;
+            
+            // All members whose head is headId or this cid
+            $st2 = $conn->prepare("SELECT id FROM customers WHERE (family_head_id = ? OR family_head_id = ?) AND is_active = 1");
+            $st2->bind_param('ii', $headId, $cid);
+            $st2->execute();
+            $res = $st2->get_result();
+            while ($r = $res->fetch_assoc()) {
+                $ids[] = (int)$r['id'];
+            }
+            $st2->close();
+            
+            // Shared primary mobile number
+            if ($mobile !== '' && strlen($mobile) >= 10) {
+                $st3 = $conn->prepare("SELECT id FROM customers WHERE mobile = ? AND is_active = 1");
+                $st3->bind_param('s', $mobile);
+                $st3->execute();
+                $res3 = $st3->get_result();
+                while ($r3 = $res3->fetch_assoc()) {
+                    $ids[] = (int)$r3['id'];
+                }
+                $st3->close();
+            }
+        }
+    } catch (\Throwable $e) {}
+    
+    return array_values(array_unique(array_filter($ids)));
+}
+
+// staff see every policy, an agent only its own book, customer only self & family
 function canSeePolicy($conn, $pid) {
-    if (($_SESSION['role'] ?? '') !== 'agent') return true;
-    $aid = agentIdForUser($conn, $_SESSION['user_id'] ?? 0);
-    if (!$aid) return false;
+    $role = $_SESSION['role'] ?? '';
+    if ($role === 'admin' || $role === 'manager') return true;
+    $uid = (int)($_SESSION['user_id'] ?? 0);
     $pid = (int)$pid;
-    $st = $conn->prepare("SELECT 1 FROM policy_entries WHERE id = ? AND agent_id = ?");
-    $st->bind_param('ii', $pid, $aid);
-    $st->execute();
-    $ok = (bool)$st->get_result()->fetch_row();
-    $st->close();
-    return $ok;
+
+    if ($role === 'agent') {
+        $aid = agentIdForUser($conn, $uid);
+        if (!$aid) return false;
+        $st = $conn->prepare("SELECT 1 FROM policy_entries WHERE id = ? AND agent_id = ?");
+        $st->bind_param('ii', $pid, $aid);
+        $st->execute();
+        $ok = (bool)$st->get_result()->fetch_row();
+        $st->close();
+        return $ok;
+    }
+
+    if ($role === 'customer') {
+        $cid = customerIdForUser($conn, $uid);
+        if (!$cid && !empty($_SESSION['customer_id'])) $cid = (int)$_SESSION['customer_id'];
+        if (!$cid) return false;
+        $famIds = getFamilyCustomerIds($conn, $cid);
+        if (empty($famIds)) return false;
+        $in = implode(',', array_map('intval', $famIds));
+        $res = $conn->query("SELECT 1 FROM policy_entries WHERE id = $pid AND customer_id IN ($in) LIMIT 1");
+        return (bool)($res && $res->num_rows > 0);
+    }
+
+    return false;
 }
 
 // expiry alerts to admins + the policy's agent, then active -> expired. renewed policies are skipped

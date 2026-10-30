@@ -41,8 +41,9 @@ CREATE TABLE `users` (
   `email` VARCHAR(200) NOT NULL UNIQUE,
   `phone` VARCHAR(15) NOT NULL UNIQUE,
   `password_hash` VARCHAR(255) NOT NULL,
-  `role` ENUM('admin','manager','agent') NOT NULL DEFAULT 'agent',
+  `role` ENUM('admin','manager','agent','customer') NOT NULL DEFAULT 'agent',
   `branch_id` BIGINT NULL,
+  `customer_id` BIGINT NULL,
   `is_active` BOOLEAN DEFAULT TRUE,
   `profile_image` VARCHAR(255) NULL,
   `theme_primary` VARCHAR(20) DEFAULT '#001f3f',
@@ -61,6 +62,7 @@ CREATE TABLE `users` (
   INDEX `idx_email` (`email`),
   INDEX `idx_role` (`role`),
   INDEX `idx_branch_id` (`branch_id`),
+  INDEX `idx_customer_id` (`customer_id`),
   INDEX `idx_is_active` (`is_active`),
   FOREIGN KEY (`branch_id`) REFERENCES `branches`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -146,6 +148,9 @@ CREATE TABLE `customers` (
   `referral_code` VARCHAR(20) NULL UNIQUE,
   `referred_by` BIGINT NULL,
   `agent_id` BIGINT NULL,
+  `family_head_id` BIGINT NULL,
+  `family_relation` VARCHAR(50) NULL DEFAULT 'Self',
+  `portal_user_id` BIGINT NULL,
   `points_balance` INT DEFAULT 0,
   `is_active` BOOLEAN DEFAULT TRUE,
   `created_by` BIGINT NULL,
@@ -154,7 +159,9 @@ CREATE TABLE `customers` (
   FOREIGN KEY (`referred_by`) REFERENCES `customers`(`id`) ON DELETE SET NULL,
   INDEX `idx_referral_code` (`referral_code`),
   INDEX `idx_referred_by` (`referred_by`),
-  INDEX `idx_cust_agent` (`agent_id`)
+  INDEX `idx_cust_agent` (`agent_id`),
+  INDEX `idx_family_head_id` (`family_head_id`),
+  INDEX `idx_portal_user_id` (`portal_user_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------

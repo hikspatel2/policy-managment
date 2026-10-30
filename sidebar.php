@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Developed by Rudees Digital
  * Website: https://rudeesdigital.com
@@ -60,7 +60,18 @@ $sbGroup = function ($id, $label, array $items) use ($sbLink) {
 };
 
 // menu per role — same links each role saw before
-if ($sb_staff) {
+if ($role === 'customer') {
+    $sb_main = [
+        ['dashboard.php', 'dashboard', 'fa-house', 'Customer Portal'],
+        ['policy_entries.php', 'policies', 'fa-shield-halved', 'My & Family Policies'],
+        ['claims.php', 'claims', 'fa-car-burst', 'Claims & Intimation', 'claims', $sb_badges['claims']],
+        ['customers.php?view=family', 'customers', 'fa-people-roof', 'Family Members'],
+        ['notifications.php', 'notifications', 'fa-bell', 'Notifications', 'notif', $sb_badges['notif']],
+    ];
+    $sb_groups = [['account-submenu', 'My Account', [
+        ['account.php', 'account', 'fa-user', 'Profile & Password'],
+    ]]];
+} elseif ($sb_staff) {
     $sb_main = [
         ['dashboard.php', 'dashboard', 'fa-chart-line', 'Dashboard'],
         ['policy_entries.php', 'policies', 'fa-file-invoice', 'Policy Entry'],
@@ -173,7 +184,7 @@ if ($sb_staff) {
         </div>
         <button type="button" class="sb-user-btn" onclick="sbUserToggle(event)" aria-haspopup="menu" aria-expanded="false" aria-controls="sbUserMenu" data-tooltip="<?php echo htmlspecialchars($username); ?>">
             <img src="<?php echo htmlspecialchars($sb_avatar); ?>" alt="" class="sb-avatar" width="38" height="38" onerror="this.src='<?php echo htmlspecialchars($sb_default_logo); ?>'">
-            <span class="sb-user-txt"><strong><?php echo htmlspecialchars($username); ?></strong><small><?php echo htmlspecialchars(ucfirst($role)); ?></small></span>
+            <span class="sb-user-txt"><strong><?php echo htmlspecialchars($username); ?></strong><small><?php echo htmlspecialchars($role === 'customer' ? 'Policy Holder' : ucfirst($role)); ?></small></span>
             <i class="fas fa-sort sb-caret"></i>
         </button>
     </div>

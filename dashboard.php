@@ -37,6 +37,106 @@ if (isset($_GET['action'])) set_exception_handler(function ($e) use ($role) {
     exit();
 });
 
+// customer stats ajax
+if (isset($_GET['action']) && $_GET['action'] === 'getCustomerStats') {
+    header('Content-Type: application/json');
+
+    if ($role !== 'customer') {
+        echo json_encode(['success' => false, 'message' => 'Access denied']);
+        exit();
+    }
+
+    $conn = getDBConnection();
+    $cid = customerIdForUser($conn, $user_id);
+    if (!$cid && !empty($_SESSION['customer_id'])) $cid = (int)$_SESSION['customer_id'];
+    $famIds = $cid ? getFamilyCustomerIds($conn, $cid) : [];
+    if (empty($famIds) && $cid) $famIds = [$cid];
+    if (empty($famIds)) $famIds = [0];
+    $inCust = implode(',', array_map('intval', $famIds));
+
+    // primary customer profile
+    $st = $conn->prepare("SELECT c.*, a.name as agent_name, a.mobile as agent_mobile, a.agent_code 
+        FROM customers c LEFT JOIN agents a ON a.id = c.agent_id WHERE c.id = ?");
+    $st->bind_param("i", $cid);
+    $st->execute();
+    $customerProfile = $st->get_result()->fetch_assoc() ?: ['name' => $username, 'mobile' => ''];
+    $st->close();
+
+    // family members
+    $famRes = $conn->query("SELECT id, name, mobile, family_relation, (SELECT COUNT(*) FROM policy_entries pe WHERE pe.customer_id = customers.id AND pe.status = 'active') as active_policies FROM customers WHERE id IN ($inCust) ORDER BY (id = $cid) DESC, name ASC");
+    $familyMembers = [];
+    if ($famRes) while ($r = $famRes->fetch_assoc()) $familyMembers[] = $r;
+
+    // total & active policies
+    $polStats = $conn->query("SELECT 
+        COUNT(*) as total_policies,
+        COALESCE(SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END), 0) as active_policies,
+        COALESCE(SUM(CASE WHEN status = 'expired' THEN 1 ELSE 0 END), 0) as expired_policies,
+        COALESCE(SUM(CASE WHEN status = 'active' AND policy_end_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY) THEN 1 ELSE 0 END), 0) as expiring_soon,
+        COALESCE(SUM(CASE WHEN insurance_category = 'motor' AND status = 'active' THEN 1 ELSE 0 END), 0) as motor_active,
+        COALESCE(SUM(CASE WHEN insurance_category = 'health' AND status = 'active' THEN 1 ELSE 0 END), 0) as health_active,
+        COALESCE(SUM(CASE WHEN insurance_category = 'health' AND status = 'active' THEN sum_insured ELSE 0 END), 0) as health_sum_insured,
+        COALESCE(SUM(CASE WHEN insurance_category = 'life' AND status = 'active' THEN 1 ELSE 0 END), 0) as life_active,
+        COALESCE(SUM(CASE WHEN insurance_category = 'life' AND status = 'active' THEN sum_assured ELSE 0 END), 0) as life_sum_assured,
+        COALESCE(SUM(CASE WHEN status = 'active' THEN total_premium_amount ELSE 0 END), 0) as total_active_premium
+    FROM policy_entries WHERE customer_id IN ($inCust)")->fetch_assoc();
+
+    // active claims
+    $clmStats = $conn->query("SELECT 
+        COUNT(*) as total_claims,
+        COALESCE(SUM(CASE WHEN c.status IN ('intimated', 'survey', 'approved') THEN 1 ELSE 0 END), 0) as active_claims,
+        COALESCE(SUM(CASE WHEN c.status = 'settled' THEN 1 ELSE 0 END), 0) as settled_claims,
+        COALESCE(SUM(CASE WHEN c.status = 'settled' THEN c.amount_settled ELSE 0 END), 0) as total_settled_amount
+    FROM claims c JOIN policy_entries pe ON pe.id = c.policy_entry_id WHERE pe.customer_id IN ($inCust)")->fetch_assoc();
+
+    // recent policies (top 8)
+    $recPolRes = $conn->query("SELECT id, policy_number, insurance_category, vehicle_number, plan_name, life_plan_type, sum_insured, sum_assured, customer_name, company_name, policy_start_date, policy_end_date, status, total_premium_amount, (customer_id = $cid) as is_personal 
+        FROM policy_entries WHERE customer_id IN ($inCust) ORDER BY (status = 'active') DESC, policy_end_date ASC, id DESC LIMIT 8");
+    $recentPolicies = [];
+    if ($recPolRes) while ($r = $recPolRes->fetch_assoc()) $recentPolicies[] = $r;
+
+    // recent active claims
+    $recClmRes = $conn->query("SELECT c.id, c.claim_number, c.claim_category, c.claim_type, c.life_claim_type, c.amount_claimed, c.amount_approved, c.amount_settled, c.status, c.intimation_date, pe.policy_number, pe.customer_name 
+        FROM claims c JOIN policy_entries pe ON pe.id = c.policy_entry_id WHERE pe.customer_id IN ($inCust) ORDER BY c.intimation_date DESC, c.id DESC LIMIT 5");
+    $recentClaims = [];
+    if ($recClmRes) while ($r = $recClmRes->fetch_assoc()) $recentClaims[] = $r;
+
+    // agent contact
+    $agentInfo = null;
+    if (!empty($customerProfile['agent_name'])) {
+        $agentInfo = [
+            'name' => $customerProfile['agent_name'],
+            'mobile' => $customerProfile['agent_mobile'],
+            'code' => $customerProfile['agent_code']
+        ];
+    } else {
+        $agFind = $conn->query("SELECT pe.agent_name, a.mobile, a.agent_code FROM policy_entries pe LEFT JOIN agents a ON a.id = pe.agent_id WHERE pe.customer_id IN ($inCust) AND pe.agent_id > 0 LIMIT 1");
+        if ($agFind && $row = $agFind->fetch_assoc()) {
+            $agentInfo = [
+                'name' => $row['agent_name'],
+                'mobile' => $row['mobile'],
+                'code' => $row['agent_code']
+            ];
+        }
+    }
+
+    $conn->close();
+
+    echo json_encode([
+        'success' => true,
+        'data' => [
+            'profile' => $customerProfile,
+            'familyMembers' => $familyMembers,
+            'stats' => $polStats,
+            'claims' => $clmStats,
+            'recentPolicies' => $recentPolicies,
+            'recentClaims' => $recentClaims,
+            'agent' => $agentInfo
+        ]
+    ]);
+    exit();
+}
+
 // agent stats ajax
 if (isset($_GET['action']) && $_GET['action'] === 'getAgentStats') {
     header('Content-Type: application/json');
@@ -583,19 +683,29 @@ $branding = getBranding();
 
         <div class="main-content">
             <?php
-            $isAgentDash = !($role === 'admin' || $role === 'manager');
-            $pageIcon    = 'fa-chart-line';
-            $pageTitle   = 'Dashboard';
+            $isCustomer  = ($role === 'customer');
+            $isAgentDash = ($role === 'agent');
+            $pageIcon    = $isCustomer ? 'fa-shield-halved' : 'fa-chart-line';
+            $pageTitle   = $isCustomer ? 'Customer & Family Insurance Portal' : 'Dashboard';
             $crumbs      = [];
-            $pageActions = [
-                ['label' => 'New Policy', 'icon' => 'fa-file-circle-plus', 'onclick' => "location.href='policy_entries.php'", 'class' => 'primary'],
-                ['label' => 'Add Customer', 'icon' => 'fa-user-plus', 'onclick' => "location.href='customers.php'"],
-                $isAgentDash
-                    ? ['label' => 'Notifications', 'icon' => 'fa-bell', 'onclick' => "location.href='notifications.php'"]
-                    : ['label' => 'Send Notification', 'icon' => 'fa-paper-plane', 'onclick' => "location.href='notifications.php'"],
-                ['label' => 'Add Task', 'icon' => 'fa-list-check', 'onclick' => "location.href='todo.php'"],
-                ['label' => 'Refresh', 'icon' => 'fa-rotate', 'onclick' => $isAgentDash ? 'loadAgentStats()' : 'loadDashboardStats()'],
-            ];
+            if ($isCustomer) {
+                $pageActions = [
+                    ['label' => 'My Policies', 'icon' => 'fa-file-shield', 'onclick' => "location.href='policy_entries.php'", 'class' => 'primary'],
+                    ['label' => 'Intimate Claim', 'icon' => 'fa-car-burst', 'onclick' => "location.href='claims.php?new=1'"],
+                    ['label' => 'Family Members', 'icon' => 'fa-users', 'onclick' => "location.href='customers.php?view=family'"],
+                    ['label' => 'Refresh', 'icon' => 'fa-rotate', 'onclick' => 'loadCustomerStats()'],
+                ];
+            } else {
+                $pageActions = [
+                    ['label' => 'New Policy', 'icon' => 'fa-file-circle-plus', 'onclick' => "location.href='policy_entries.php'", 'class' => 'primary'],
+                    ['label' => 'Add Customer', 'icon' => 'fa-user-plus', 'onclick' => "location.href='customers.php'"],
+                    $isAgentDash
+                        ? ['label' => 'Notifications', 'icon' => 'fa-bell', 'onclick' => "location.href='notifications.php'"]
+                        : ['label' => 'Send Notification', 'icon' => 'fa-paper-plane', 'onclick' => "location.href='notifications.php'"],
+                    ['label' => 'Add Task', 'icon' => 'fa-list-check', 'onclick' => "location.href='todo.php'"],
+                    ['label' => 'Refresh', 'icon' => 'fa-rotate', 'onclick' => $isAgentDash ? 'loadAgentStats()' : 'loadDashboardStats()'],
+                ];
+            }
             include 'page_header.php';
             ?>
 
@@ -777,6 +887,198 @@ $branding = getBranding();
                     </table>
                 </div>
 
+            </div>
+            <?php elseif ($role === 'customer'): ?>
+            <!-- ====== CUSTOMER & FAMILY INSURANCE PORTAL ====== -->
+            <div id="custPortalSkeleton" class="data-section">
+                <div class="skeleton-card" style="height:120px;margin-bottom:16px;"></div>
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:16px;">
+                    <div class="skeleton-card" style="height:100px;"></div>
+                    <div class="skeleton-card" style="height:100px;"></div>
+                    <div class="skeleton-card" style="height:100px;"></div>
+                    <div class="skeleton-card" style="height:100px;"></div>
+                </div>
+            </div>
+
+            <div id="custPortalContent" style="display:none;">
+                <!-- Hero & Agent Contact -->
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:16px;margin-bottom:20px;">
+                    <div class="card" style="margin-bottom:0;background:linear-gradient(135deg, #0f2b48 0%, #1a4971 100%);color:#fff;border:none;">
+                        <div class="card-body" style="padding:24px;">
+                            <span class="status-badge chip-blue" style="margin-bottom:10px;display:inline-block;background:rgba(255,255,255,0.15);color:#fff;border-color:rgba(255,255,255,0.25);">
+                                <i class="fas fa-house-chimney-user"></i> Family Policy Portal
+                            </span>
+                            <h2 style="margin:0 0 6px 0;font-size:22px;color:#fff;" id="custWelcomeName">Welcome</h2>
+                            <p style="margin:0;opacity:0.85;font-size:13px;" id="custSubDesc">Track and manage insurance protection for yourself and all family members.</p>
+                            <div style="margin-top:16px;display:flex;gap:10px;flex-wrap:wrap;">
+                                <a href="policy_entries.php" class="btn btn-sm" style="background:#fff;color:#0f2b48;font-weight:600;"><i class="fas fa-file-shield"></i> View All Policies</a>
+                                <a href="claims.php?new=1" class="btn btn-sm btn-danger" style="background:#ef4444;border-color:#ef4444;"><i class="fas fa-car-burst"></i> Intimate Claim</a>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card" style="margin-bottom:0;" id="custAgentCard">
+                        <div class="card-header" style="background:var(--bg-light);border-bottom:1px solid var(--border-color);">
+                            <h4 style="margin:0;font-size:15px;color:var(--navy-primary);"><i class="fas fa-user-tie"></i> Dedicated Insurance Agent</h4>
+                        </div>
+                        <div class="card-body" style="padding:18px;">
+                            <div style="display:flex;align-items:center;gap:14px;">
+                                <div style="width:48px;height:48px;border-radius:50%;background:rgba(30,58,138,0.1);display:flex;align-items:center;justify-content:center;color:var(--navy-primary);font-size:20px;">
+                                    <i class="fas fa-headset"></i>
+                                </div>
+                                <div style="flex:1;">
+                                    <h4 style="margin:0 0 4px 0;font-size:16px;" id="custAgentName">Assigned Agent</h4>
+                                    <span class="text-muted" style="font-size:12px;" id="custAgentCode">Advisor</span>
+                                </div>
+                            </div>
+                            <div style="margin-top:14px;display:flex;gap:8px;" id="custAgentActions">
+                                <a href="#" id="custAgentCallBtn" class="btn btn-sm btn-secondary" style="flex:1;text-align:center;"><i class="fas fa-phone"></i> Call Agent</a>
+                                <a href="#" id="custAgentWaBtn" target="_blank" rel="noopener" class="btn btn-sm btn-success" style="flex:1;text-align:center;background:#25D366;border-color:#25D366;"><i class="fab fa-whatsapp"></i> WhatsApp</a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 4 Major Coverage Cards -->
+                <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px;margin-bottom:24px;">
+                    <!-- Active Policies -->
+                    <div class="card" style="margin-bottom:0;border-left:4px solid #2563eb;">
+                        <div class="card-body" style="padding:18px;">
+                            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                                <div>
+                                    <span class="text-muted" style="font-size:12px;text-transform:uppercase;font-weight:600;">Total Protection</span>
+                                    <h3 style="margin:6px 0 2px 0;font-size:24px;" id="tileActivePol">0</h3>
+                                    <small class="text-muted" id="tileTotalPolSub">0 total policies</small>
+                                </div>
+                                <span style="width:40px;height:40px;border-radius:8px;background:rgba(37,99,235,0.1);color:#2563eb;display:flex;align-items:center;justify-content:center;font-size:18px;"><i class="fas fa-shield-check"></i></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Motor Insurance -->
+                    <div class="card" style="margin-bottom:0;border-left:4px solid #3b82f6;">
+                        <div class="card-body" style="padding:18px;">
+                            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                                <div>
+                                    <span class="text-muted" style="font-size:12px;text-transform:uppercase;font-weight:600;">Motor Insurance</span>
+                                    <h3 style="margin:6px 0 2px 0;font-size:24px;" id="tileMotorCount">0</h3>
+                                    <small class="text-muted">Vehicles Insured</small>
+                                </div>
+                                <span style="width:40px;height:40px;border-radius:8px;background:rgba(59,130,246,0.1);color:#3b82f6;display:flex;align-items:center;justify-content:center;font-size:18px;"><i class="fas fa-car"></i></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Health Insurance -->
+                    <div class="card" style="margin-bottom:0;border-left:4px solid #10b981;">
+                        <div class="card-body" style="padding:18px;">
+                            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                                <div>
+                                    <span class="text-muted" style="font-size:12px;text-transform:uppercase;font-weight:600;">Health Sum Insured</span>
+                                    <h3 style="margin:6px 0 2px 0;font-size:22px;color:#059669;" id="tileHealthSI">₹0</h3>
+                                    <small class="text-muted" id="tileHealthSub">0 Active Plan(s)</small>
+                                </div>
+                                <span style="width:40px;height:40px;border-radius:8px;background:rgba(16,185,129,0.1);color:#10b981;display:flex;align-items:center;justify-content:center;font-size:18px;"><i class="fas fa-heart-pulse"></i></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Life Insurance -->
+                    <div class="card" style="margin-bottom:0;border-left:4px solid #8b5cf6;">
+                        <div class="card-body" style="padding:18px;">
+                            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                                <div>
+                                    <span class="text-muted" style="font-size:12px;text-transform:uppercase;font-weight:600;">Life Sum Assured</span>
+                                    <h3 style="margin:6px 0 2px 0;font-size:22px;color:#7c3aed;" id="tileLifeSA">₹0</h3>
+                                    <small class="text-muted" id="tileLifeSub">0 Active Plan(s)</small>
+                                </div>
+                                <span style="width:40px;height:40px;border-radius:8px;background:rgba(139,92,246,0.1);color:#8b5cf6;display:flex;align-items:center;justify-content:center;font-size:18px;"><i class="fas fa-user-shield"></i></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Alert banner if expiring soon -->
+                <div id="custExpiringAlert" style="display:none;margin-bottom:20px;padding:14px 18px;border-radius:8px;background:#fef2f2;border:1px solid #fecaca;color:#991b1b;align-items:center;justify-content:space-between;">
+                    <div style="display:flex;align-items:center;gap:12px;">
+                        <i class="fas fa-triangle-exclamation" style="font-size:20px;"></i>
+                        <div>
+                            <strong>Upcoming Expiry Alert:</strong>
+                            <span id="custExpiringText">You have policies expiring in the next 30 days.</span>
+                        </div>
+                    </div>
+                    <a href="policy_entries.php" class="btn btn-sm btn-danger"><i class="fas fa-redo"></i> Renew Now</a>
+                </div>
+
+                <!-- Policies & Family Members 2-Column Section -->
+                <div style="display:grid;grid-template-columns:2fr 1fr;gap:20px;margin-bottom:24px;">
+                    <!-- Recent Policies Table -->
+                    <div class="card" style="margin-bottom:0;">
+                        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                            <h3 style="margin:0;font-size:16px;"><i class="fas fa-file-contract"></i> My &amp; Family Policies</h3>
+                            <a href="policy_entries.php" class="btn btn-sm btn-secondary">View All</a>
+                        </div>
+                        <div class="card-body" style="padding:0;">
+                            <div style="overflow-x:auto;">
+                                <table class="table" style="margin:0;" id="custPoliciesTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Member</th>
+                                            <th>Vertical</th>
+                                            <th>Policy / Details</th>
+                                            <th>Insurer</th>
+                                            <th>Expiry</th>
+                                            <th>Status</th>
+                                            <th style="text-align:right;">Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="custPoliciesList">
+                                        <tr><td colspan="7" class="text-center text-muted" style="padding:20px;">Loading policies...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Family Group Members -->
+                    <div class="card" style="margin-bottom:0;">
+                        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                            <h3 style="margin:0;font-size:16px;"><i class="fas fa-people-roof"></i> Family Group</h3>
+                            <a href="customers.php?view=family" class="btn btn-sm btn-secondary"><i class="fas fa-user-plus"></i> Add</a>
+                        </div>
+                        <div class="card-body" style="padding:14px;" id="custFamilyList">
+                            <div class="text-muted text-center" style="padding:15px;">Loading family members...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Active Claims Tracker -->
+                <div class="card" style="margin-bottom:0;" id="custClaimsCard">
+                    <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;">
+                        <h3 style="margin:0;font-size:16px;"><i class="fas fa-car-burst"></i> Recent &amp; Active Claims</h3>
+                        <a href="claims.php" class="btn btn-sm btn-secondary">View All Claims</a>
+                    </div>
+                    <div class="card-body" style="padding:0;">
+                        <div style="overflow-x:auto;">
+                            <table class="table" style="margin:0;" id="custClaimsTable">
+                                <thead>
+                                    <tr>
+                                        <th>Claim #</th>
+                                        <th>Policy #</th>
+                                        <th>Member</th>
+                                        <th>Type</th>
+                                        <th>Claimed Amount</th>
+                                        <th>Status</th>
+                                        <th>Intimation Date</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="custClaimsList">
+                                    <tr><td colspan="7" class="text-center text-muted" style="padding:15px;">No active claims recorded.</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             </div>
             <?php else: ?>
             <!-- ====== AGENT DASHBOARD ====== -->
@@ -1509,6 +1811,165 @@ $branding = getBranding();
     initSearchableDropdown(document.getElementById('agRangeSelect'));
     document.getElementById('agRangeSelect').sdRefresh(); // show preset
     loadAgentStats();
+    <?php endif; ?>
+
+    <?php if ($role === 'customer'): ?>
+    function loadCustomerStats() {
+        $('#custPortalSkeleton').show();
+        $('#custPortalContent').hide();
+        $.ajax({
+            url: '?action=getCustomerStats',
+            method: 'GET',
+            dataType: 'json',
+            success: function(res) {
+                if (!res.success) {
+                    $('#custPortalSkeleton').hide();
+                    Swal.fire('Error', res.message || 'Failed to load portal stats', 'error');
+                    return;
+                }
+                var d = res.data;
+                var prof = d.profile || {};
+                var st = d.stats || {};
+                var clm = d.claims || {};
+                var ag = d.agent || null;
+
+                // Welcome info
+                $('#custWelcomeName').text('Welcome, ' + (prof.name || 'Valued Customer'));
+                var famCount = (d.familyMembers || []).length;
+                $('#custSubDesc').text('Protecting ' + (prof.name || 'You') + (famCount > 1 ? ' and ' + (famCount - 1) + ' family member(s).' : '.'));
+
+                // Agent info
+                if (ag && ag.name) {
+                    $('#custAgentName').text(ag.name);
+                    $('#custAgentCode').text('Agent Code: ' + (ag.code || 'Advisor'));
+                    if (ag.mobile) {
+                        $('#custAgentCallBtn').attr('href', 'tel:' + ag.mobile);
+                        var cleanMob = String(ag.mobile).replace(/[^0-9]/g, '');
+                        if (cleanMob.length === 10) cleanMob = '91' + cleanMob;
+                        $('#custAgentWaBtn').attr('href', 'https://wa.me/' + cleanMob + '?text=' + encodeURIComponent('Hello ' + ag.name + ', I need help with my insurance policy.')).show();
+                    } else {
+                        $('#custAgentCallBtn').hide();
+                        $('#custAgentWaBtn').hide();
+                    }
+                    $('#custAgentCard').show();
+                } else {
+                    $('#custAgentName').text('Agency Customer Care');
+                    $('#custAgentCode').text('Support');
+                    $('#custAgentCallBtn').attr('href', 'tel:8160140848');
+                    $('#custAgentWaBtn').attr('href', 'https://wa.me/918160140848?text=Hello%20Support').show();
+                }
+
+                // Summary tiles
+                $('#tileActivePol').text(st.active_policies || 0);
+                $('#tileTotalPolSub').text((st.total_policies || 0) + ' total policies enrolled');
+                $('#tileMotorCount').text(st.motor_active || 0);
+
+                var healthAmt = Number(st.health_sum_insured || 0);
+                $('#tileHealthSI').text('₹' + healthAmt.toLocaleString('en-IN', {maximumFractionDigits: 0}));
+                $('#tileHealthSub').text((st.health_active || 0) + ' active Health policy(ies)');
+
+                var lifeAmt = Number(st.life_sum_assured || 0);
+                $('#tileLifeSA').text('₹' + lifeAmt.toLocaleString('en-IN', {maximumFractionDigits: 0}));
+                $('#tileLifeSub').text((st.life_active || 0) + ' active Life policy(ies)');
+
+                // Expiring alert
+                if (Number(st.expiring_soon || 0) > 0) {
+                    $('#custExpiringText').text('You have ' + st.expiring_soon + ' policy(ies) expiring within the next 30 days.');
+                    $('#custExpiringAlert').css('display', 'flex');
+                } else {
+                    $('#custExpiringAlert').hide();
+                }
+
+                // Recent policies table
+                var pols = d.recentPolicies || [];
+                if (pols.length === 0) {
+                    $('#custPoliciesList').html('<tr><td colspan="7" class="text-center text-muted" style="padding:20px;">No policies found. Contact your agent to enroll.</td></tr>');
+                } else {
+                    var h = '';
+                    pols.forEach(function(p) {
+                        var cat = (p.insurance_category || 'motor').toLowerCase();
+                        var chip = cat === 'health' ? 'chip-emerald' : (cat === 'life' ? 'chip-purple' : 'chip-blue');
+                        var ico = cat === 'health' ? 'fa-heart-pulse' : (cat === 'life' ? 'fa-user-shield' : 'fa-car');
+                        var catLbl = cat === 'health' ? 'Health' : (cat === 'life' ? 'Life' : 'Motor');
+
+                        var badge = p.is_personal ? '<span class="status-badge status-active" style="font-size:10px;padding:2px 6px;">Self</span>' : '<span class="status-badge status-user" style="font-size:10px;padding:2px 6px;">Family</span>';
+
+                        var desc = p.vehicle_number || p.plan_name || (p.life_plan_type ? p.life_plan_type.toUpperCase() : '-');
+                        var stCls = p.status === 'active' ? 'status-active' : (p.status === 'expired' ? 'status-cancelled' : 'status-pending');
+
+                        h += '<tr>';
+                        h += '<td><strong>' + rsEsc(p.customer_name) + '</strong> ' + badge + '</td>';
+                        h += '<td><span class="status-badge ' + chip + '" style="font-size:11px;"><i class="fas ' + ico + '"></i> ' + catLbl + '</span></td>';
+                        h += '<td><span class="badge-code">' + rsEsc(p.policy_number) + '</span><br><small class="text-muted">' + rsEsc(desc) + '</small></td>';
+                        h += '<td>' + rsEsc(p.company_name) + '</td>';
+                        h += '<td>' + rsEsc(p.policy_end_date) + '</td>';
+                        h += '<td><span class="policy-status ' + stCls + '">' + rsEsc(p.status.toUpperCase()) + '</span></td>';
+                        h += '<td style="text-align:right;">';
+                        h += '<a href="policy_entries.php" class="action-icon view-icon" title="View"><i class="fas fa-eye"></i></a> ';
+                        if (p.status === 'active') {
+                            h += '<a href="claims.php?new=1&policy_id=' + p.id + '" class="action-icon" style="color:#ef4444;" title="Claim"><i class="fas fa-car-burst"></i></a>';
+                        }
+                        h += '</td>';
+                        h += '</tr>';
+                    });
+                    $('#custPoliciesList').html(h);
+                }
+
+                // Family group list
+                var fam = d.familyMembers || [];
+                if (fam.length === 0) {
+                    $('#custFamilyList').html('<div class="text-muted text-center" style="padding:15px;">No family members linked yet.</div>');
+                } else {
+                    var fh = '';
+                    fam.forEach(function(m) {
+                        var rel = m.family_relation || 'Self';
+                        var isSelf = (m.id == prof.id);
+                        fh += '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px;border-bottom:1px solid var(--border-color);">';
+                        fh += '<div style="display:flex;align-items:center;gap:10px;">';
+                        fh += '<div style="width:36px;height:36px;border-radius:50%;background:rgba(30,58,138,0.1);display:flex;align-items:center;justify-content:center;color:var(--navy-primary);font-weight:bold;font-size:13px;">' + rsEsc(m.name.charAt(0)) + '</div>';
+                        fh += '<div><strong style="font-size:13px;">' + rsEsc(m.name) + '</strong> ' + (isSelf ? '<span class="status-badge status-active" style="font-size:9px;padding:1px 5px;">Head</span>' : '') + '<br><small class="text-muted">' + rsEsc(rel) + (m.mobile ? ' · ' + rsEsc(m.mobile) : '') + '</small></div>';
+                        fh += '</div>';
+                        fh += '<span class="status-badge status-user" style="font-size:11px;">' + (m.active_policies || 0) + ' policy(ies)</span>';
+                        fh += '</div>';
+                    });
+                    $('#custFamilyList').html(fh);
+                }
+
+                // Claims list
+                var claims = d.recentClaims || [];
+                if (claims.length === 0) {
+                    $('#custClaimsList').html('<tr><td colspan="7" class="text-center text-muted" style="padding:15px;">No claims recorded.</td></tr>');
+                } else {
+                    var ch = '';
+                    claims.forEach(function(c) {
+                        var amt = '₹' + Number(c.amount_claimed || 0).toLocaleString('en-IN', {minimumFractionDigits: 2});
+                        var cStCls = c.status === 'settled' ? 'status-active' : (c.status === 'rejected' ? 'status-cancelled' : 'status-pending');
+                        ch += '<tr>';
+                        ch += '<td><span class="badge-code">' + rsEsc(c.claim_number) + '</span></td>';
+                        ch += '<td>' + rsEsc(c.policy_number) + '</td>';
+                        ch += '<td>' + rsEsc(c.customer_name) + '</td>';
+                        ch += '<td>' + rsEsc(c.claim_type || c.life_claim_type || '-') + '</td>';
+                        ch += '<td><strong>' + amt + '</strong></td>';
+                        ch += '<td><span class="policy-status ' + cStCls + '">' + rsEsc(c.status.toUpperCase()) + '</span></td>';
+                        ch += '<td>' + rsEsc(c.intimation_date) + '</td>';
+                        ch += '</tr>';
+                    });
+                    $('#custClaimsList').html(ch);
+                }
+
+                $('#custPortalSkeleton').hide();
+                $('#custPortalContent').show();
+            },
+            error: function() {
+                $('#custPortalSkeleton').hide();
+                Swal.fire('Error', 'Connection error while loading customer portal', 'error');
+            }
+        });
+    }
+
+    $(document).ready(function() {
+        loadCustomerStats();
+    });
     <?php endif; ?>
     </script>
 </body>

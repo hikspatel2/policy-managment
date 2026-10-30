@@ -146,8 +146,9 @@ function setupSchema($conn)
         email VARCHAR(200) NOT NULL UNIQUE,
         phone VARCHAR(15) NOT NULL UNIQUE,
         password_hash VARCHAR(255) NOT NULL,
-        role ENUM('admin','manager','agent') NOT NULL DEFAULT 'agent',
+        role ENUM('admin','manager','agent','customer') NOT NULL DEFAULT 'agent',
         branch_id BIGINT NULL,
+        customer_id BIGINT NULL,
         is_active BOOLEAN DEFAULT TRUE,
         profile_image VARCHAR(255) NULL,
         theme_primary VARCHAR(20) DEFAULT '#001f3f',
@@ -160,6 +161,7 @@ function setupSchema($conn)
         INDEX idx_email (email),
         INDEX idx_role (role),
         INDEX idx_branch_id (branch_id),
+        INDEX idx_customer_id (customer_id),
         INDEX idx_is_active (is_active),
         FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE SET NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
@@ -217,13 +219,19 @@ function setupSchema($conn)
         state VARCHAR(100) NULL,
         referral_code VARCHAR(20) NULL UNIQUE,
         referred_by BIGINT NULL,
+        agent_id BIGINT NULL,
+        family_head_id BIGINT NULL,
+        family_relation VARCHAR(50) NULL DEFAULT 'Self',
+        portal_user_id BIGINT NULL,
         points_balance INT DEFAULT 0,
         is_active BOOLEAN DEFAULT TRUE,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (referred_by) REFERENCES customers(id) ON DELETE SET NULL,
         INDEX idx_referral_code (referral_code),
-        INDEX idx_referred_by (referred_by)
+        INDEX idx_referred_by (referred_by),
+        INDEX idx_family_head_id (family_head_id),
+        INDEX idx_portal_user_id (portal_user_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
     createTable($conn, 'bank_accounts', "CREATE TABLE IF NOT EXISTS bank_accounts (
@@ -924,9 +932,18 @@ function setupColumnFixups($conn)
         ['claims', 'diagnosis', "TEXT NULL AFTER doctor_name"],
         ['claims', 'life_claim_type', "ENUM('death','maturity','surrender','critical_illness','disability') NULL AFTER diagnosis"],
         ['claims', 'date_of_event', "DATE NULL AFTER life_claim_type"],
+        // Customer & Family Portal enhancements
+        ['users', 'customer_id', "BIGINT NULL AFTER branch_id"],
+        ['customers', 'agent_id', "BIGINT NULL AFTER referred_by"],
+        ['customers', 'family_head_id', "BIGINT NULL AFTER agent_id"],
+        ['customers', 'family_relation', "VARCHAR(50) NULL DEFAULT 'Self' AFTER family_head_id"],
+        ['customers', 'portal_user_id', "BIGINT NULL AFTER family_relation"],
     ];
     foreach ($cols as [$t, $c, $def])
         addColumnIfNotExists($conn, $t, $c, $def);
+
+    // Update users role enum to include customer
+    @$conn->query("ALTER TABLE users MODIFY COLUMN role ENUM('admin','manager','agent','customer') NOT NULL DEFAULT 'agent'");
 
     // Make vehicle fields nullable for non-motor policies
     @$conn->query("ALTER TABLE policy_entries MODIFY COLUMN vehicle_id BIGINT NULL");
@@ -935,6 +952,10 @@ function setupColumnFixups($conn)
 
     addIndexIfNotExists($conn, 'policy_entries', 'idx_insurance_category', 'insurance_category');
     addIndexIfNotExists($conn, 'claims', 'idx_claim_category', 'claim_category');
+    addIndexIfNotExists($conn, 'users', 'idx_customer_id', 'customer_id');
+    addIndexIfNotExists($conn, 'customers', 'idx_cust_agent', 'agent_id');
+    addIndexIfNotExists($conn, 'customers', 'idx_family_head_id', 'family_head_id');
+    addIndexIfNotExists($conn, 'customers', 'idx_portal_user_id', 'portal_user_id');
     addIndexIfNotExists($conn, 'branches', 'idx_branch_code', 'branch_code');
     addIndexIfNotExists($conn, 'customers', 'idx_cust_agent', 'agent_id');
     addIndexIfNotExists($conn, 'policy_entries', 'idx_prev_policy', 'previous_policy_id');

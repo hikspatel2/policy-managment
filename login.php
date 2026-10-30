@@ -130,20 +130,23 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
             }
         }
     } else {
-        $email = isset($_POST['email']) ? trim($_POST['email']) : '';
+        $loginInput = isset($_POST['email']) ? trim($_POST['email']) : '';
         $password = isset($_POST['password']) ? $_POST['password'] : '';
 
-        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $error = 'Invalid email format.';
+        $isEmail = filter_var($loginInput, FILTER_VALIDATE_EMAIL);
+        $isPhone = preg_match('/^[0-9+\s-]{10,15}$/', $loginInput);
+
+        if (!$isEmail && !$isPhone) {
+            $error = 'Enter a valid email address or 10-digit mobile number.';
         } elseif (validatePassword($password) === false) {
             $error = 'Invalid password format.';
-        } elseif (checkLoginAttempts($email)) {
+        } elseif (checkLoginAttempts($loginInput)) {
             $error = 'Too many login attempts. Please try again in 15 minutes.';
         } else {
             try {
                 $conn = getDBConnection();
-                $stmt = $conn->prepare("SELECT id, name, email, password_hash, role, is_active FROM users WHERE email = ?");
-                $stmt->bind_param("s", $email);
+                $stmt = $conn->prepare("SELECT id, name, email, phone, password_hash, role, customer_id, is_active FROM users WHERE email = ? OR phone = ?");
+                $stmt->bind_param("ss", $loginInput, $loginInput);
                 $stmt->execute();
                 $result = $stmt->get_result();
             } catch (Exception $e) {
@@ -164,15 +167,28 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 if (!$user['is_active']) {
                     $error = 'Account is deactivated. Contact administrator.';
                 } elseif (password_verify($password, $user['password_hash'])) {
-                    clearLoginAttempts($email);
-                    recordLoginAttempt($email, true); // success trail
+                    clearLoginAttempts($loginInput);
+                    recordLoginAttempt($loginInput, true); // success trail
                     session_regenerate_id(true);
 
                     $_SESSION['user_id'] = $user['id'];
                     $_SESSION['username'] = $user['name']; // compat key
                     $_SESSION['email'] = $user['email'];
                     $_SESSION['role'] = $user['role'];
+                    $_SESSION['customer_id'] = !empty($user['customer_id']) ? (int)$user['customer_id'] : null;
                     $_SESSION['LAST_ACTIVITY'] = time();
+
+                    if ($user['role'] === 'customer' && empty($_SESSION['customer_id'])) {
+                        $cSt = $conn->prepare("SELECT id FROM customers WHERE email = ? OR mobile = ? LIMIT 1");
+                        $cSt->bind_param("ss", $user['email'], $user['phone']);
+                        $cSt->execute();
+                        $cRow = $cSt->get_result()->fetch_assoc();
+                        $cSt->close();
+                        if ($cRow) {
+                            $_SESSION['customer_id'] = (int)$cRow['id'];
+                            $conn->query("UPDATE users SET customer_id = " . (int)$cRow['id'] . " WHERE id = " . (int)$user['id']);
+                        }
+                    }
 
                     // update last login
                     $ip = $_SERVER['REMOTE_ADDR'] ?? '';
@@ -277,8 +293,8 @@ $titles = ['login' => 'Login', 'forgot' => 'Forgot Password', 'reset' => 'Set a 
                 <input type="hidden" name="form" value="login">
 
                 <div class="form-group">
-                    <label for="email"><i class="fas fa-envelope"></i> Email</label>
-                    <input type="email" id="email" name="email" required autofocus autocomplete="email">
+                    <label for="email"><i class="fas fa-user"></i> Email or Mobile</label>
+                    <input type="text" id="email" name="email" placeholder="Email address or mobile" required autofocus autocomplete="username">
                 </div>
 
                 <div class="form-group">
