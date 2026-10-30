@@ -24,7 +24,7 @@ $isAdmin = ($role === 'admin');
 $isManager = ($role === 'manager');
 $isAgent = ($role === 'agent');
 $isCustomer = ($role === 'customer');
-$canCreate = $isAgent; // Only agents can create/add new policies; Admin views and manages
+$canCreate = ($isAdmin || $isManager || $isAgent);
 $canEdit = ($isAdmin || $isAgent);
 $canDelete = $isAdmin;
 
@@ -3392,7 +3392,7 @@ if ($isAdmin) {
 
     function openAddModal() {
         if (!CAN_CREATE) {
-            Swal.fire({ icon: 'warning', title: 'Restricted', text: 'Only agents are allowed to create new policies.' });
+            Swal.fire({ icon: 'warning', title: 'Restricted', text: 'You do not have permission to add policies.' });
             return;
         }
         isEditMode = false;

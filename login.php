@@ -377,17 +377,17 @@ $titles = ['login' => 'Login', 'forgot' => 'Forgot Password', 'reset' => 'Set a 
             <form method="POST" action="login.php">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                 <input type="hidden" name="form" value="login">
-                <input type="hidden" name="login_role" id="loginRole" value="all">
+                <input type="hidden" name="login_role" id="loginRole" value="admin">
 
                 <div class="role-tabs">
-                    <button type="button" class="role-tab active" data-role="all"><i class="fas fa-shield-halved"></i> Staff</button>
+                    <button type="button" class="role-tab active" data-role="admin"><i class="fas fa-user-shield"></i> Admin</button>
                     <button type="button" class="role-tab" data-role="agent"><i class="fas fa-user-tie"></i> Agent</button>
                     <button type="button" class="role-tab" data-role="customer"><i class="fas fa-user"></i> Customer</button>
                 </div>
 
                 <div class="form-group">
-                    <label for="email" id="loginLabel"><i class="fas fa-user"></i> Email or Mobile</label>
-                    <input type="text" id="email" name="email" placeholder="Email address, mobile or agent code" required autofocus autocomplete="username">
+                    <label for="email" id="loginLabel"><i class="fas fa-user-shield"></i> Admin Email or Mobile</label>
+                    <input type="text" id="email" name="email" placeholder="admin@demo.com or mobile" required autofocus autocomplete="username">
                 </div>
 
                 <div class="form-group">
@@ -400,7 +400,7 @@ $titles = ['login' => 'Login', 'forgot' => 'Forgot Password', 'reset' => 'Set a 
                 <?php endif; ?>
 
                 <button type="submit" class="btn btn-primary btn-block">
-                    <i class="fas fa-sign-in-alt"></i> Login
+                    <i class="fas fa-sign-in-alt"></i> <span id="loginBtnText">Login as Admin</span>
                 </button>
             </form>
             <?php endif; ?>
@@ -462,17 +462,21 @@ $titles = ['login' => 'Login', 'forgot' => 'Forgot Password', 'reset' => 'Set a 
 
             var label = document.getElementById('loginLabel');
             var input = document.getElementById('email');
+            var btnText = document.getElementById('loginBtnText');
             if (!label || !input) return;
 
-            if (role === 'agent') {
+            if (role === 'admin') {
+                label.innerHTML = '<i class="fas fa-user-shield"></i> Admin Email or Mobile';
+                input.setAttribute('placeholder', 'admin@demo.com or mobile');
+                if (btnText) btnText.textContent = 'Login as Admin';
+            } else if (role === 'agent') {
                 label.innerHTML = '<i class="fas fa-id-badge"></i> Agent Code, Email or Mobile';
                 input.setAttribute('placeholder', 'Agent Code (e.g. AGT-001), Email or Mobile');
+                if (btnText) btnText.textContent = 'Login as Agent';
             } else if (role === 'customer') {
-                label.innerHTML = '<i class="fas fa-user"></i> Mobile or Email';
+                label.innerHTML = '<i class="fas fa-user"></i> Customer Mobile or Email';
                 input.setAttribute('placeholder', '10-digit mobile or registered email');
-            } else {
-                label.innerHTML = '<i class="fas fa-user"></i> Email or Mobile';
-                input.setAttribute('placeholder', 'Email address, mobile or agent code');
+                if (btnText) btnText.textContent = 'Login as Customer';
             }
         });
     });

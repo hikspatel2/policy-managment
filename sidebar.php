@@ -74,7 +74,7 @@ if ($role === 'customer') {
 } elseif ($sb_staff) {
     $sb_main = [
         ['dashboard.php', 'dashboard', 'fa-chart-line', 'Dashboard'],
-        ['policy_entries.php', 'policies', 'fa-file-invoice', 'Policy List'],
+        ['policy_entries.php', 'policies', 'fa-file-invoice', 'Policy Entry'],
         ['vehicles.php', 'vehicles', 'fa-car', 'Vehicle List'],
         ['claims.php', 'claims', 'fa-car-burst', 'Claims', 'claims', $sb_badges['claims']],
         ['referrals.php', 'referrals', 'fa-gift', 'Referrals & Points'],

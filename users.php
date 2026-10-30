@@ -820,10 +820,10 @@ $isAdmin = ($role === 'admin');
                         <div class="form-group">
                             <label><i class="fas fa-user-tag"></i> Role *</label>
                             <select id="userRole" name="role" required class="searchable" onchange="onRoleChange(this.value)">
-                                <option value="agent">Agent</option>
-                                <option value="manager">Manager</option>
-                                <option value="admin">Admin</option>
-                                <option value="customer">Customer / Policy Holder</option>
+                                <option value="admin">Admin (All Modules & Full System Control)</option>
+                                <option value="agent">Agent (Policy Management & Customer Book)</option>
+                                <option value="customer">Customer (Policy Holder Portal)</option>
+                                <option value="manager">Manager (Operations & Staff)</option>
                             </select>
                         </div>
                         <div class="form-group" id="userCustomerGroup" style="display:none;">
@@ -1081,9 +1081,9 @@ $isAdmin = ($role === 'admin');
 
         // role-capability summary by role
         const ROLE_CAPS = {
-            admin: ['Full system access', 'Manage users, branches & roles', 'Create/edit/delete all records', 'View activity logs & reports', 'Send notifications'],
+            admin: ['Full access to all system modules', 'Manage users, branches, agents & roles', 'Create, edit & delete all policies & records', 'Full accounting, banking & expenses', 'Payout charts, reports & activity logs', 'Decide & assign roles to Agent and Customer'],
             manager: ['Manage policies, agents & customers', 'View branch reports', 'Create & assign tasks', 'No user/branch management', 'Cannot delete users'],
-            agent: ['View & enter own policies', 'Add & manage assigned customers', 'View own commission & book', 'Submit claim intimations', 'No admin tools'],
+            agent: ['Manage assigned customers & vehicles', 'Create & manage policies (Motor, Health, Life)', 'View commission ledger & payout charts', 'Submit claim intimations', 'Agent book dashboard'],
             customer: ['Personal & family policy portal', 'View personal & family policies (Motor, Health, Life)', 'Download policy PDFs & documents', 'Submit & track claim intimations', 'Manage family members', 'Financial data & commissions hidden for privacy']
         };
 
