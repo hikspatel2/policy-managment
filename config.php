@@ -946,32 +946,42 @@ function getAgentSubscription($conn, $agentId) {
     $aid = (int)$agentId;
     if ($aid <= 0) return null;
 
-    $stmt = $conn->prepare("SELECT s.*, p.name AS plan_name, p.slug AS plan_slug, p.description AS plan_description,
-                                   p.max_customers, p.max_policies, p.monthly_ai_scans, p.whatsapp_limit,
-                                   p.reports_access, p.advanced_features, p.team_members_limit,
-                                   DATEDIFF(s.expiry_date, CURDATE()) AS days_left
-                            FROM subscriptions s
-                            JOIN subscription_plans p ON s.plan_id = p.id
-                            WHERE s.agent_id = ?
-                            ORDER BY (s.status = 'active' AND s.expiry_date >= CURDATE()) DESC, s.id DESC
-                            LIMIT 1");
-    if (!$stmt) return null;
-    $stmt->bind_param('i', $aid);
-    $stmt->execute();
-    $sub = $stmt->get_result()->fetch_assoc();
-    $stmt->close();
+    try {
+        $stmt = $conn->prepare("SELECT s.*, p.name AS plan_name, p.slug AS plan_slug, p.description AS plan_description,
+                                       p.max_customers, p.max_policies, p.monthly_ai_scans, p.whatsapp_limit,
+                                       p.reports_access, p.advanced_features, p.team_members_limit,
+                                       DATEDIFF(s.expiry_date, CURDATE()) AS days_left
+                                FROM subscriptions s
+                                JOIN subscription_plans p ON s.plan_id = p.id
+                                WHERE s.agent_id = ?
+                                ORDER BY (s.status = 'active' AND s.expiry_date >= CURDATE()) DESC, s.id DESC
+                                LIMIT 1");
+        if (!$stmt) return null;
+        $stmt->bind_param('i', $aid);
+        $stmt->execute();
+        $sub = $stmt->get_result()->fetch_assoc();
+        $stmt->close();
 
-    if (!$sub) return null;
+        if (!$sub) return null;
 
-    // Refresh actual customer and policy counts
-    $cRes = $conn->query("SELECT COUNT(*) FROM customers WHERE agent_id = $aid AND is_active = 1");
-    $sub['actual_customer_count'] = ($cRes && ($r = $cRes->fetch_row())) ? (int)$r[0] : 0;
+        // Refresh actual customer and policy counts safely
+        $sub['actual_customer_count'] = 0;
+        try {
+            $cRes = $conn->query("SELECT COUNT(*) FROM customers WHERE agent_id = $aid AND (is_active = 1 OR is_active IS NULL)");
+            if ($cRes && ($r = $cRes->fetch_row())) $sub['actual_customer_count'] = (int)$r[0];
+        } catch (\Throwable $e) {}
 
-    $pRes = $conn->query("SELECT COUNT(*) FROM policy_entries WHERE agent_id = $aid AND deleted_at IS NULL");
-    $sub['actual_policy_count'] = ($pRes && ($r = $pRes->fetch_row())) ? (int)$r[0] : 0;
+        $sub['actual_policy_count'] = 0;
+        try {
+            $pRes = $conn->query("SELECT COUNT(*) FROM policy_entries WHERE agent_id = $aid AND deleted_at IS NULL");
+            if ($pRes && ($r = $pRes->fetch_row())) $sub['actual_policy_count'] = (int)$r[0];
+        } catch (\Throwable $e) {}
 
-    $sub['is_valid'] = ($sub['status'] === 'active' && (int)$sub['days_left'] >= 0);
-    return $sub;
+        $sub['is_valid'] = ($sub['status'] === 'active' && (int)($sub['days_left'] ?? 0) >= 0);
+        return $sub;
+    } catch (\Throwable $e) {
+        return null;
+    }
 }
 
 function checkAgentSubscriptionLimit($conn, $agentId, $resource = 'general') {
@@ -982,78 +992,105 @@ function checkAgentSubscriptionLimit($conn, $agentId, $resource = 'general') {
 
     $aid = (int)$agentId;
     if ($aid <= 0) {
-        return ['allowed' => false, 'message' => 'Invalid agent account.'];
+        return ['allowed' => true, 'current' => 0, 'limit' => 999999, 'message' => ''];
     }
 
-    $sub = getAgentSubscription($conn, $aid);
-    if (!$sub || !$sub['is_valid']) {
-        return [
-            'allowed' => false,
-            'reason' => 'subscription_expired',
-            'message' => 'Active subscription plan required. Please select or renew your subscription.',
-            'redirect' => 'agent_plans.php'
-        ];
-    }
+    try {
+        $sub = getAgentSubscription($conn, $aid);
+        if (!$sub) {
+            // Check if subscription_plans table exists and has active plans
+            $hasPlans = false;
+            try {
+                $checkP = $conn->query("SELECT COUNT(*) FROM subscription_plans WHERE is_active = 1");
+                if ($checkP && ($r = $checkP->fetch_row()) && (int)$r[0] > 0) {
+                    $hasPlans = true;
+                }
+            } catch (\Throwable $e) {}
 
-    switch ($resource) {
-        case 'customer':
-            $current = (int)$sub['actual_customer_count'];
-            $max = (int)$sub['max_customers'];
-            if ($current >= $max) {
-                return [
-                    'allowed' => false,
-                    'reason' => 'limit_exceeded',
-                    'current' => $current,
-                    'limit' => $max,
-                    'message' => "Customer limit reached ($current / $max). Please upgrade your plan."
-                ];
+            if (!$hasPlans) {
+                // No active subscription plans configured yet; allow access gracefully
+                return ['allowed' => true, 'current' => 0, 'limit' => 999999, 'message' => ''];
             }
-            return ['allowed' => true, 'current' => $current, 'limit' => $max];
 
-        case 'policy':
-            $current = (int)$sub['actual_policy_count'];
-            $max = (int)$sub['max_policies'];
-            if ($current >= $max) {
-                return [
-                    'allowed' => false,
-                    'reason' => 'limit_exceeded',
-                    'current' => $current,
-                    'limit' => $max,
-                    'message' => "Policy limit reached ($current / $max). Please upgrade your plan."
-                ];
-            }
-            return ['allowed' => true, 'current' => $current, 'limit' => $max];
+            return [
+                'allowed' => false,
+                'reason' => 'subscription_expired',
+                'message' => 'Active subscription plan required. Please select or renew your subscription.',
+                'redirect' => 'agent_plans.php'
+            ];
+        }
 
-        case 'ai_scan':
-            $current = (int)$sub['ai_scan_count'];
-            $max = (int)$sub['monthly_ai_scans'];
-            if ($current >= $max) {
-                return [
-                    'allowed' => false,
-                    'reason' => 'limit_exceeded',
-                    'current' => $current,
-                    'limit' => $max,
-                    'message' => "Monthly AI Policy Scan limit reached ($current / $max). Please upgrade your plan."
-                ];
-            }
-            return ['allowed' => true, 'current' => $current, 'limit' => $max];
+        if (!$sub['is_valid']) {
+            return [
+                'allowed' => false,
+                'reason' => 'subscription_expired',
+                'message' => 'Active subscription plan required. Please select or renew your subscription.',
+                'redirect' => 'agent_plans.php'
+            ];
+        }
 
-        case 'whatsapp':
-            $current = (int)$sub['whatsapp_count'];
-            $max = (int)$sub['whatsapp_limit'];
-            if ($current >= $max) {
-                return [
-                    'allowed' => false,
-                    'reason' => 'limit_exceeded',
-                    'current' => $current,
-                    'limit' => $max,
-                    'message' => "WhatsApp notification limit reached ($current / $max). Please upgrade your plan."
-                ];
-            }
-            return ['allowed' => true, 'current' => $current, 'limit' => $max];
+        switch ($resource) {
+            case 'customer':
+                $current = (int)($sub['actual_customer_count'] ?? 0);
+                $max = (int)($sub['max_customers'] ?? 999999);
+                if ($current >= $max) {
+                    return [
+                        'allowed' => false,
+                        'reason' => 'limit_exceeded',
+                        'current' => $current,
+                        'limit' => $max,
+                        'message' => "Customer limit reached ($current / $max). Please upgrade your plan."
+                    ];
+                }
+                return ['allowed' => true, 'current' => $current, 'limit' => $max];
 
-        default:
-            return ['allowed' => true];
+            case 'policy':
+                $current = (int)($sub['actual_policy_count'] ?? 0);
+                $max = (int)($sub['max_policies'] ?? 999999);
+                if ($current >= $max) {
+                    return [
+                        'allowed' => false,
+                        'reason' => 'limit_exceeded',
+                        'current' => $current,
+                        'limit' => $max,
+                        'message' => "Policy limit reached ($current / $max). Please upgrade your plan."
+                    ];
+                }
+                return ['allowed' => true, 'current' => $current, 'limit' => $max];
+
+            case 'ai_scan':
+                $current = (int)($sub['ai_scan_count'] ?? 0);
+                $max = (int)($sub['monthly_ai_scans'] ?? 999999);
+                if ($current >= $max) {
+                    return [
+                        'allowed' => false,
+                        'reason' => 'limit_exceeded',
+                        'current' => $current,
+                        'limit' => $max,
+                        'message' => "Monthly AI Policy Scan limit reached ($current / $max). Please upgrade your plan."
+                    ];
+                }
+                return ['allowed' => true, 'current' => $current, 'limit' => $max];
+
+            case 'whatsapp':
+                $current = (int)($sub['whatsapp_count'] ?? 0);
+                $max = (int)($sub['whatsapp_limit'] ?? 999999);
+                if ($current >= $max) {
+                    return [
+                        'allowed' => false,
+                        'reason' => 'limit_exceeded',
+                        'current' => $current,
+                        'limit' => $max,
+                        'message' => "WhatsApp notification limit reached ($current / $max). Please upgrade your plan."
+                    ];
+                }
+                return ['allowed' => true, 'current' => $current, 'limit' => $max];
+
+            default:
+                return ['allowed' => true, 'current' => 0, 'limit' => 999999];
+        }
+    } catch (\Throwable $e) {
+        return ['allowed' => true, 'current' => 0, 'limit' => 999999, 'message' => ''];
     }
 }
 

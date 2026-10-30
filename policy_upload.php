@@ -15,19 +15,54 @@ if (!$userId || !in_array($role, ['admin', 'manager', 'agent'], true)) {
 
 $conn = getDBConnection();
 $branding = getBranding();
-$aid = ($role === 'agent') ? agentIdForUser($conn, $userId) : 0;
+$aid = ($role === 'agent') ? (int)(agentIdForUser($conn, $userId) ?? 0) : 0;
+
+// Self-healing: ensure policy_extractions table exists and has nullable agent_id
+try {
+    $conn->query("CREATE TABLE IF NOT EXISTS `policy_extractions` (
+      `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+      `document_id` BIGINT NULL,
+      `policy_entry_id` BIGINT NULL,
+      `agent_id` BIGINT NULL,
+      `customer_id` BIGINT NULL,
+      `file_path` VARCHAR(255) NOT NULL,
+      `raw_text` LONGTEXT NULL,
+      `extracted_data` LONGTEXT NULL,
+      `confidence_scores` TEXT NULL,
+      `ai_provider` VARCHAR(50) NOT NULL DEFAULT 'gemini',
+      `scanning_status` ENUM('uploaded','processing','completed','failed','manual_review') NOT NULL DEFAULT 'uploaded',
+      `error_message` TEXT NULL,
+      `processing_time_ms` INT NULL,
+      `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+      `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX `idx_pe_agent` (`agent_id`),
+      INDEX `idx_pe_status` (`scanning_status`),
+      INDEX `idx_pe_policy` (`policy_entry_id`)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    @$conn->query("ALTER TABLE `policy_extractions` MODIFY COLUMN `agent_id` BIGINT NULL");
+} catch (\Throwable $e) {}
+
+// Self-healing: ensure customers table has agent_id column
+try {
+    $chkCol = $conn->query("SHOW COLUMNS FROM customers LIKE 'agent_id'");
+    if ($chkCol && $chkCol->num_rows === 0) {
+        $conn->query("ALTER TABLE customers ADD COLUMN agent_id BIGINT NULL AFTER id");
+    }
+} catch (\Throwable $e) {}
 
 // Enforce Agent Subscription Limit
 if ($role === 'agent') {
-    $subLimit = checkAgentSubscriptionLimit($conn, $aid, 'policy');
-    if (!$subLimit['allowed']) {
-        die("<div style='max-width:600px;margin:50px auto;padding:25px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;font-family:sans-serif;'>
-            <h3 style='color:#991b1b;margin-top:0;'><i class='fas fa-ban'></i> Subscription Limit Reached</h3>
-            <p style='color:#7f1d1d;'>" . htmlspecialchars($subLimit['message']) . "</p>
-            <a href='agent_plans.php' style='display:inline-block;background:#001f3f;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600;'>Upgrade Subscription Plan</a>
-            <a href='dashboard.php' style='margin-left:10px;color:#64748b;text-decoration:none;'>Return to Dashboard</a>
-        </div>");
-    }
+    try {
+        $subLimit = checkAgentSubscriptionLimit($conn, $aid, 'policy');
+        if (!empty($subLimit) && isset($subLimit['allowed']) && !$subLimit['allowed']) {
+            die("<div style='max-width:600px;margin:50px auto;padding:25px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;font-family:sans-serif;'>
+                <h3 style='color:#991b1b;margin-top:0;'><i class='fas fa-ban'></i> Subscription Limit Reached</h3>
+                <p style='color:#7f1d1d;'>" . htmlspecialchars($subLimit['message'] ?? 'Subscription required') . "</p>
+                <a href='agent_plans.php' style='display:inline-block;background:#001f3f;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600;'>Upgrade Subscription Plan</a>
+                <a href='dashboard.php' style='margin-left:10px;color:#64748b;text-decoration:none;'>Return to Dashboard</a>
+            </div>");
+        }
+    } catch (\Throwable $e) {}
 }
 
 $error = '';
@@ -36,14 +71,47 @@ $notice = '';
 // Pre-selected customer if passed via GET
 $selectedCustId = (int)($_GET['customer_id'] ?? 0);
 
+// Fetch agents list for staff assignment dropdown
+$agentsList = [];
+if ($role !== 'agent') {
+    try {
+        $agRes = $conn->query("SELECT id, agent_code, name FROM agents WHERE is_active = 1 ORDER BY name ASC");
+        if ($agRes) {
+            while ($ag = $agRes->fetch_assoc()) $agentsList[] = $ag;
+        }
+    } catch (\Throwable $e) {
+        try {
+            $agRes = $conn->query("SELECT id, agent_code, name FROM agents ORDER BY name ASC");
+            if ($agRes) {
+                while ($ag = $agRes->fetch_assoc()) $agentsList[] = $ag;
+            }
+        } catch (\Throwable $e2) {
+            $agentsList = [];
+        }
+    }
+}
+
 // Fetch customers list for this agent (or all for staff)
-$custQuery = ($role === 'agent')
-    ? "SELECT id, name, mobile, email FROM customers WHERE agent_id = $aid AND is_active = 1 ORDER BY name ASC"
-    : "SELECT id, name, mobile, email FROM customers WHERE is_active = 1 ORDER BY name ASC";
-$custRes = $conn->query($custQuery);
 $customers = [];
-if ($custRes) {
-    while ($r = $custRes->fetch_assoc()) $customers[] = $r;
+try {
+    if ($role === 'agent' && $aid > 0) {
+        $custQuery = "SELECT id, name, mobile, email FROM customers WHERE agent_id = $aid AND (is_active = 1 OR is_active IS NULL) ORDER BY name ASC";
+    } else {
+        $custQuery = "SELECT id, name, mobile, email FROM customers WHERE (is_active = 1 OR is_active IS NULL) ORDER BY name ASC";
+    }
+    $custRes = $conn->query($custQuery);
+    if ($custRes) {
+        while ($r = $custRes->fetch_assoc()) $customers[] = $r;
+    }
+} catch (\Throwable $e) {
+    try {
+        $custRes = $conn->query("SELECT id, name, mobile, email FROM customers ORDER BY name ASC");
+        if ($custRes) {
+            while ($r = $custRes->fetch_assoc()) $customers[] = $r;
+        }
+    } catch (\Throwable $e2) {
+        $customers = [];
+    }
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -64,18 +132,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 // Check agent customer limits
                 if ($role === 'agent') {
-                    $cLimit = checkAgentSubscriptionLimit($conn, $aid, 'customer');
-                    if (!$cLimit['allowed']) {
-                        $error = $cLimit['message'];
-                    }
+                    try {
+                        $cLimit = checkAgentSubscriptionLimit($conn, $aid, 'customer');
+                        if (!$cLimit['allowed']) {
+                            $error = $cLimit['message'];
+                        }
+                    } catch (\Throwable $e) {}
                 }
 
                 if (!$error) {
-                    $insCust = $conn->prepare("INSERT INTO customers (name, mobile, email, agent_id, primary_wa_consent, consent_timestamp, consent_source, is_active) VALUES (?, ?, ?, ?, 1, NOW(), 'policy_upload', 1)");
-                    $insCust->bind_param("sssi", $newCustName, $newCustMobile, $newCustEmail, $aid);
-                    $insCust->execute();
-                    $customerId = $conn->insert_id;
-                    $insCust->close();
+                    try {
+                        $agentVal = ($aid > 0) ? $aid : null;
+                        $insCust = $conn->prepare("INSERT INTO customers (name, mobile, email, agent_id, primary_wa_consent, consent_timestamp, consent_source, is_active) VALUES (?, ?, ?, ?, 1, NOW(), 'policy_upload', 1)");
+                        if ($insCust) {
+                            $insCust->bind_param("sssi", $newCustName, $newCustMobile, $newCustEmail, $agentVal);
+                            $insCust->execute();
+                            $customerId = $conn->insert_id;
+                            $insCust->close();
+                        }
+                    } catch (\Throwable $e) {
+                        try {
+                            $insCust = $conn->prepare("INSERT INTO customers (name, mobile, email) VALUES (?, ?, ?)");
+                            if ($insCust) {
+                                $insCust->bind_param("sss", $newCustName, $newCustMobile, $newCustEmail);
+                                $insCust->execute();
+                                $customerId = $conn->insert_id;
+                                $insCust->close();
+                            }
+                        } catch (\Throwable $e2) {
+                            $error = 'Failed to register customer: ' . $e2->getMessage();
+                        }
+                    }
                 }
             }
         }
@@ -117,27 +204,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         if ($assignedAgentId && $assignedAgentId <= 0) $assignedAgentId = null;
 
                         // Insert policy extraction record
-                        if ($assignedAgentId) {
-                            $insExt = $conn->prepare("INSERT INTO policy_extractions (agent_id, customer_id, file_path, scanning_status) VALUES (?, ?, ?, 'uploaded')");
-                            $insExt->bind_param("iis", $assignedAgentId, $customerId, $relPath);
-                        } else {
-                            $insExt = $conn->prepare("INSERT INTO policy_extractions (agent_id, customer_id, file_path, scanning_status) VALUES (NULL, ?, ?, 'uploaded')");
-                            $insExt->bind_param("is", $customerId, $relPath);
+                        try {
+                            if ($assignedAgentId) {
+                                $insExt = $conn->prepare("INSERT INTO policy_extractions (agent_id, customer_id, file_path, scanning_status) VALUES (?, ?, ?, 'uploaded')");
+                                $insExt->bind_param("iis", $assignedAgentId, $customerId, $relPath);
+                            } else {
+                                $insExt = $conn->prepare("INSERT INTO policy_extractions (agent_id, customer_id, file_path, scanning_status) VALUES (NULL, ?, ?, 'uploaded')");
+                                $insExt->bind_param("is", $customerId, $relPath);
+                            }
+                            $insExt->execute();
+                            $extId = $conn->insert_id;
+                            $insExt->close();
+
+                            logActivity($userId, $_SESSION['username'] ?? '', 'Upload Policy', "Uploaded document for Customer #{$customerId}, Extraction #{$extId}");
+
+                            $conn->close();
+
+                            if ($runAiScan) {
+                                header("Location: ai_scanner.php?ext_id=" . $extId . "&category=" . urlencode($category) . "&auto=1");
+                            } else {
+                                header("Location: policy_verify.php?ext_id=" . $extId . "&category=" . urlencode($category));
+                            }
+                            exit();
+                        } catch (\Throwable $e) {
+                            $error = 'Failed to create policy extraction record: ' . $e->getMessage();
                         }
-                        $insExt->execute();
-                        $extId = $conn->insert_id;
-                        $insExt->close();
-
-                        logActivity($userId, $_SESSION['username'] ?? '', 'Upload Policy', "Uploaded document for Customer #{$customerId}, Extraction #{$extId}");
-
-                        $conn->close();
-
-                        if ($runAiScan) {
-                            header("Location: ai_scanner.php?ext_id=" . $extId . "&category=" . urlencode($category) . "&auto=1");
-                        } else {
-                            header("Location: policy_verify.php?ext_id=" . $extId . "&category=" . urlencode($category));
-                        }
-                        exit();
                     }
                 }
             }

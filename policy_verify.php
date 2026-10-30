@@ -15,24 +15,35 @@ if (!$userId || !in_array($role, ['admin', 'manager', 'agent'], true)) {
 
 $conn = getDBConnection();
 $branding = getBranding();
-$aid = ($role === 'agent') ? agentIdForUser($conn, $userId) : 0;
+$aid = ($role === 'agent') ? (int)(agentIdForUser($conn, $userId) ?? 0) : 0;
 $currency = $branding['currency_symbol'] ?? '₹';
 
 $extId = (int)($_GET['ext_id'] ?? 0);
 $category = trim($_GET['category'] ?? 'motor');
 
+if ($extId <= 0) {
+    header("Location: policy_upload.php");
+    exit();
+}
+
 // Fetch extraction record
-$eStmt = $conn->prepare("SELECT pe.*, c.name AS cust_name, c.mobile AS cust_mobile, c.email AS cust_email 
-                         FROM policy_extractions pe 
-                         LEFT JOIN customers c ON c.id = pe.customer_id 
-                         WHERE pe.id = ? LIMIT 1");
-$eStmt->bind_param("i", $extId);
-$eStmt->execute();
-$ext = $eStmt->get_result()->fetch_assoc();
-$eStmt->close();
+$ext = null;
+try {
+    $eStmt = $conn->prepare("SELECT pe.*, c.name AS cust_name, c.mobile AS cust_mobile, c.email AS cust_email 
+                             FROM policy_extractions pe 
+                             LEFT JOIN customers c ON c.id = pe.customer_id 
+                             WHERE pe.id = ? LIMIT 1");
+    if ($eStmt) {
+        $eStmt->bind_param("i", $extId);
+        $eStmt->execute();
+        $ext = $eStmt->get_result()->fetch_assoc();
+        $eStmt->close();
+    }
+} catch (\Throwable $e) {}
 
 if (!$ext) {
-    die("Extraction record #{$extId} not found.");
+    header("Location: policy_upload.php?error=not_found");
+    exit();
 }
 
 if ($role === 'agent' && !empty($ext['agent_id']) && (int)$ext['agent_id'] !== $aid) {
