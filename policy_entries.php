@@ -2101,7 +2101,8 @@ if ($isAdmin) {
             $crumbs      = [];
             $pageActions = [];
             if ($canCreate && !$isCustomer) {
-                $pageActions[] = ['label' => 'Add Policy', 'icon' => 'fa-plus', 'onclick' => 'openAddModal()', 'class' => 'primary'];
+                $pageActions[] = ['label' => 'Upload & Scan', 'icon' => 'fa-file-arrow-up', 'onclick' => "window.location='policy_upload.php'", 'class' => 'primary'];
+                $pageActions[] = ['label' => 'Add Policy', 'icon' => 'fa-plus', 'onclick' => 'openAddModal()'];
                 $pageActions[] = ['label' => 'Bulk Upload', 'icon' => 'fa-file-excel', 'onclick' => 'openUploadModal()'];
             }
             $pageActions[] = ['label' => 'CSV', 'icon' => 'fa-file-csv', 'onclick' => "dtBtn(policiesTable,'csv')"];
