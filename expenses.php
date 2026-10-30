@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Developed by Rudees Digital
  * Website: https://rudeesdigital.com
@@ -756,9 +756,8 @@ function uploadReceipt($file) {
         return ['success' => false, 'message' => 'Receipt file must be less than 2MB'];
     }
 
-    $finfo = finfo_open(FILEINFO_MIME_TYPE);
-    $mimeType = finfo_file($finfo, $file['tmp_name']);
-    finfo_close($finfo);
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mimeType = $finfo->file($file['tmp_name']);
 
     if (!in_array($mimeType, $allowedTypes)) {
         return ['success' => false, 'message' => 'Invalid file type. Only images and PDF allowed'];

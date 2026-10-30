@@ -485,9 +485,8 @@ if (isset($_GET['action'])) {
                 $file = $_FILES['document'] ?? null;
                 if (!$file || $file['error'] !== UPLOAD_ERR_OK) clmOut(['success' => false, 'message' => 'No file uploaded or upload error']);
                 if ($file['size'] > 5 * 1024 * 1024) clmOut(['success' => false, 'message' => 'File too large. Max 5MB']);
-                $finfo = finfo_open(FILEINFO_MIME_TYPE);
-                $mime = finfo_file($finfo, $file['tmp_name']);
-                finfo_close($finfo);
+                $finfo = new finfo(FILEINFO_MIME_TYPE);
+                $mime = $finfo->file($file['tmp_name']);
                 if (!in_array($mime, ['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'], true)) clmOut(['success' => false, 'message' => 'Invalid file type. Allowed: PDF, JPG, PNG, GIF, WEBP']);
                 $ext = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
                 if (!in_array($ext, ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp'], true)) clmOut(['success' => false, 'message' => 'Invalid file extension']);

@@ -492,9 +492,8 @@ function uploadProfileImage($file, $user_id) {
     }
 
     // Check file type by MIME
-    $finfo = finfo_open(FILEINFO_MIME_TYPE);
-    $mime_type = finfo_file($finfo, $file['tmp_name']);
-    finfo_close($finfo);
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mime_type = $finfo->file($file['tmp_name']);
 
     if (!in_array($mime_type, $allowed_types)) {
         return ['success' => false, 'message' => 'Invalid file type. Only JPG, PNG, GIF, and WEBP allowed'];

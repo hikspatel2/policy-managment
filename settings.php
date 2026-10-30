@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Developed by Rudees Digital
  * Website: https://rudeesdigital.com
@@ -215,9 +215,8 @@ if (isset($_POST['action'])) {
                 exit();
             }
 
-            $finfo = finfo_open(FILEINFO_MIME_TYPE);
-            $mime = finfo_file($finfo, $file['tmp_name']);
-            finfo_close($finfo);
+            $finfo = new finfo(FILEINFO_MIME_TYPE);
+            $mime = $finfo->file($file['tmp_name']);
 
             if (!in_array($mime, $allowed)) {
                 echo json_encode(['success' => false, 'message' => 'Invalid file type. Use JPG, PNG, GIF or WEBP']);

@@ -1488,9 +1488,8 @@ if (isset($_GET['action'])) {
                 // MIME check
                 $allowedMimes = ['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp'];
                 $allowedExts = ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp'];
-                $finfo = finfo_open(FILEINFO_MIME_TYPE);
-                $mime = finfo_file($finfo, $file['tmp_name']);
-                finfo_close($finfo);
+                $finfo = new finfo(FILEINFO_MIME_TYPE);
+                $mime = $finfo->file($file['tmp_name']);
 
                 if (!in_array($mime, $allowedMimes)) {
                     echo json_encode(['success' => false, 'message' => 'Invalid file type. Allowed: PDF, JPG, PNG, GIF, WEBP']);
