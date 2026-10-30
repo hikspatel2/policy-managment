@@ -16,6 +16,9 @@ if (!$userId || !in_array($role, ['admin', 'manager', 'agent'], true)) {
 $conn = getDBConnection();
 $branding = getBranding();
 $aid = ($role === 'agent') ? (int) (agentIdForUser($conn, $userId) ?? 0) : 0;
+$username = $_SESSION['username'] ?? 'User';
+$current_page = 'policy_upload';
+$user_id = $userId;
 
 // Self-healing: ensure policy_extractions table exists and has nullable agent_id
 try {
@@ -439,81 +442,49 @@ $categories = getInsuranceCategories($conn, true);
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
     <title>Upload Insurance Policy — <?php echo htmlspecialchars($branding['site_name']); ?></title>
     <link rel="icon" href="<?php echo htmlspecialchars(getBranding()['site_logo']); ?>">
+
+    <!-- Dependencies -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
-    <link rel="stylesheet" href="styles.css?v=5.0">
+    <link rel="stylesheet" href="styles.css?v=16.0">
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="app.js?v=2.3"></script>
+
     <style>
-        body {
-            background: #f4f6fa;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            margin: 0;
-            padding: 24px 15px 40px;
-            color: #1e293b;
+        /* Modern Centered Card Inside Main Content */
+        .upload-card-wrapper {
+            max-width: 780px;
+            margin: 15px auto 40px;
+            padding: 0 10px;
         }
 
-        .page-container {
-            max-width: 760px;
-            margin: 0 auto;
-        }
-
-        /* Top Header Nav (Matches User Screenshot) */
-        .top-nav-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 18px;
-        }
-        .btn-back-dashboard {
-            background: #334155;
-            color: #ffffff;
-            padding: 8px 16px;
-            border-radius: 6px;
-            text-decoration: none;
-            font-size: 13.5px;
-            font-weight: 600;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            transition: background 0.2s;
-        }
-        .btn-back-dashboard:hover {
-            background: #1e293b;
-            color: #ffffff;
-        }
-        .top-history-link {
-            font-size: 13.5px;
-            color: #0284c7;
-            text-decoration: none;
-            font-weight: 600;
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .top-history-link:hover {
-            text-decoration: underline;
-        }
-
-        /* Centered White Card (Exact Match to Screenshot) */
-        .upload-card {
+        .upload-clean-card {
             background: #ffffff;
             border-radius: 16px;
             border: 1px solid #e2e8f0;
             box-shadow: 0 4px 20px rgba(0, 0, 0, 0.05);
-            padding: 38px 42px 34px;
+            padding: 36px 40px 32px;
+            transition: all 0.25s ease;
+        }
+        body.dark-mode .upload-clean-card {
+            background: #1e293b;
+            border-color: #334155;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
         }
         @media (max-width: 600px) {
-            .upload-card {
+            .upload-clean-card {
                 padding: 22px 18px 24px;
             }
         }
 
         /* Top Icon & Title */
         .icon-top-badge {
-            width: 44px;
-            height: 44px;
-            border-radius: 10px;
+            width: 46px;
+            height: 46px;
+            border-radius: 12px;
             background: #e0f2fe;
             color: #0284c7;
             display: flex;
@@ -521,6 +492,10 @@ $categories = getInsuranceCategories($conn, true);
             justify-content: center;
             font-size: 20px;
             margin: 0 auto 12px;
+        }
+        body.dark-mode .icon-top-badge {
+            background: #0369a1;
+            color: #e0f2fe;
         }
         .card-heading {
             margin: 0 0 6px;
@@ -530,6 +505,9 @@ $categories = getInsuranceCategories($conn, true);
             text-align: center;
             letter-spacing: -0.2px;
         }
+        body.dark-mode .card-heading {
+            color: #f8fafc;
+        }
         .card-subheading {
             color: #64748b;
             font-size: 13.5px;
@@ -537,6 +515,9 @@ $categories = getInsuranceCategories($conn, true);
             text-align: center;
             line-height: 1.5;
             max-width: 520px;
+        }
+        body.dark-mode .card-subheading {
+            color: #94a3b8;
         }
 
         /* Dual Entry Mode Tabs (Scan vs Manual) */
@@ -548,14 +529,18 @@ $categories = getInsuranceCategories($conn, true);
             margin-bottom: 22px;
             border: 1px solid #e2e8f0;
         }
+        body.dark-mode .entry-mode-bar {
+            background: #0f172a;
+            border-color: #334155;
+        }
         .mode-tab-btn {
             flex: 1;
-            padding: 9px 14px;
+            padding: 10px 14px;
             text-align: center;
             font-size: 13.5px;
             font-weight: 700;
             color: #64748b;
-            border-radius: 7px;
+            border-radius: 8px;
             cursor: pointer;
             border: none;
             background: transparent;
@@ -565,10 +550,18 @@ $categories = getInsuranceCategories($conn, true);
             justify-content: center;
             gap: 8px;
         }
+        body.dark-mode .mode-tab-btn {
+            color: #94a3b8;
+        }
         .mode-tab-btn.active {
             background: #ffffff;
             color: #001f3f;
             box-shadow: 0 2px 8px rgba(0,0,0,0.06);
+        }
+        body.dark-mode .mode-tab-btn.active {
+            background: #1e293b;
+            color: #38bdf8;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.3);
         }
 
         /* Section Headings */
@@ -580,6 +573,9 @@ $categories = getInsuranceCategories($conn, true);
             display: flex;
             align-items: center;
             gap: 7px;
+        }
+        body.dark-mode .section-header {
+            color: #f1f5f9;
         }
         .section-header i {
             color: #0284c7;
@@ -610,14 +606,26 @@ $categories = getInsuranceCategories($conn, true);
             background: #ffffff;
             user-select: none;
         }
+        body.dark-mode .cat-tile {
+            background: #0f172a;
+            border-color: #334155;
+        }
         .cat-tile:hover {
             border-color: #93c5fd;
             background: #f8fafc;
+        }
+        body.dark-mode .cat-tile:hover {
+            background: #1e293b;
         }
         .cat-tile.active {
             border-color: #0284c7;
             box-shadow: 0 0 0 1px #0284c7;
             background: #f0f7ff;
+        }
+        body.dark-mode .cat-tile.active {
+            background: rgba(2, 132, 199, 0.18);
+            border-color: #38bdf8;
+            box-shadow: 0 0 0 1px #38bdf8;
         }
         .cat-radio {
             width: 16px;
@@ -632,6 +640,9 @@ $categories = getInsuranceCategories($conn, true);
         .cat-tile.active .cat-radio {
             border-color: #0284c7;
         }
+        body.dark-mode .cat-tile.active .cat-radio {
+            border-color: #38bdf8;
+        }
         .cat-radio::after {
             content: '';
             width: 8px;
@@ -639,6 +650,9 @@ $categories = getInsuranceCategories($conn, true);
             background: #0284c7;
             border-radius: 50%;
             display: none;
+        }
+        body.dark-mode .cat-radio::after {
+            background: #38bdf8;
         }
         .cat-tile.active .cat-radio::after {
             display: block;
@@ -656,6 +670,9 @@ $categories = getInsuranceCategories($conn, true);
             color: #1e293b;
             white-space: nowrap;
         }
+        body.dark-mode .cat-title {
+            color: #f1f5f9;
+        }
 
         /* Form Inputs */
         .form-control-input, .form-control-select {
@@ -670,12 +687,17 @@ $categories = getInsuranceCategories($conn, true);
             outline: none;
             transition: border-color 0.2s, box-shadow 0.2s;
         }
+        body.dark-mode .form-control-input, body.dark-mode .form-control-select {
+            background: #0f172a;
+            border-color: #334155;
+            color: #f8fafc;
+        }
         .form-control-input:focus, .form-control-select:focus {
             border-color: #0284c7;
             box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.12);
         }
 
-        /* Quick Add Customer Box (Exact Match to Screenshot) */
+        /* Quick Add Customer Box */
         .new-cust-box {
             background: #fafbfc;
             border: 1px solid #e2e8f0;
@@ -683,6 +705,10 @@ $categories = getInsuranceCategories($conn, true);
             padding: 16px 18px;
             margin-top: 10px;
             margin-bottom: 22px;
+        }
+        body.dark-mode .new-cust-box {
+            background: #0f172a;
+            border-color: #334155;
         }
         .new-cust-header {
             font-size: 13px;
@@ -692,6 +718,9 @@ $categories = getInsuranceCategories($conn, true);
             display: flex;
             align-items: center;
             gap: 6px;
+        }
+        body.dark-mode .new-cust-header {
+            color: #e2e8f0;
         }
 
         /* Dropzone (Exact Match to Screenshot) */
@@ -706,9 +735,17 @@ $categories = getInsuranceCategories($conn, true);
             margin-top: 6px;
             margin-bottom: 16px;
         }
+        body.dark-mode .dropzone {
+            background: #0f172a;
+            border-color: #475569;
+        }
         .dropzone:hover, .dropzone.dragover {
             border-color: #0284c7;
             background: #f0f9ff;
+        }
+        body.dark-mode .dropzone:hover, body.dark-mode .dropzone.dragover {
+            background: rgba(2, 132, 199, 0.12);
+            border-color: #38bdf8;
         }
         .dropzone-cloud-icon {
             font-size: 36px;
@@ -722,13 +759,16 @@ $categories = getInsuranceCategories($conn, true);
             font-size: 14.5px;
             font-weight: 700;
         }
+        body.dark-mode .dropzone-title {
+            color: #f8fafc;
+        }
         .dropzone-sub {
             margin: 0;
             color: #64748b;
             font-size: 12.5px;
         }
 
-        /* AI Policy Scanning Alert Card (Exact Match to Screenshot) */
+        /* AI Policy Scanning Alert Card */
         .toggle-switch-card {
             background: #f0fdf4;
             border: 1px solid #bbf7d0;
@@ -738,6 +778,10 @@ $categories = getInsuranceCategories($conn, true);
             display: flex;
             align-items: center;
             gap: 12px;
+        }
+        body.dark-mode .toggle-switch-card {
+            background: rgba(22, 163, 74, 0.12);
+            border-color: #166534;
         }
         .toggle-switch-card input[type="checkbox"] {
             width: 18px;
@@ -752,14 +796,20 @@ $categories = getInsuranceCategories($conn, true);
             font-weight: 700;
             margin: 0 0 2px;
         }
+        body.dark-mode .toggle-title {
+            color: #86efac;
+        }
         .toggle-desc {
             margin: 0;
             color: #15803d;
             font-size: 12px;
             line-height: 1.4;
         }
+        body.dark-mode .toggle-desc {
+            color: #bbf7d0;
+        }
 
-        /* Action Buttons (Exact Match to Screenshot) */
+        /* Action Buttons */
         .btn-submit-action {
             width: 100%;
             background: #001f3f;
@@ -791,246 +841,260 @@ $categories = getInsuranceCategories($conn, true);
             margin-top: 6px;
             margin-bottom: 22px;
         }
+        body.dark-mode .manual-section-card {
+            background: #0f172a;
+            border-color: #334155;
+        }
     </style>
 </head>
 <body>
-    <div class="page-container">
-        <!-- Top Nav Bar (Exact Match to Screenshot) -->
-        <div class="top-nav-bar">
-            <a href="dashboard.php" class="btn-back-dashboard">
-                <i class="fas fa-arrow-left"></i> Back to Dashboard
-            </a>
-            <a href="policy_entries.php" class="top-history-link">
-                <i class="fas fa-file-lines"></i> View Policy Extraction History
-            </a>
-        </div>
+<script>/* theme before paint */(function(){var t=localStorage.getItem('theme');if(t==='dark'||(!t&&matchMedia('(prefers-color-scheme:dark)').matches))document.body.classList.add('dark-mode');})();</script>
+<?php include 'mobile-menu.php'; ?>
 
-        <div class="upload-card">
-            <!-- Center Top Icon & Heading (Exact Match to Screenshot) -->
-            <div class="icon-top-badge">
-                <i class="fas fa-file-arrow-up"></i>
-            </div>
-            <h1 class="card-heading">Upload Insurance Policy</h1>
-            <p class="card-subheading">Upload any client policy PDF or image. AI will extract coverage and schedule expiry reminders.</p>
+<div class="app-container">
+    <?php include 'sidebar.php'; ?>
 
-            <?php if ($error): ?>
-                <div style="background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; font-size: 13.5px;">
-                    <i class="fas fa-exclamation-triangle"></i>
-                    <div><?php echo htmlspecialchars($error); ?></div>
+    <div class="main-content">
+        <?php
+        $pageIcon = 'fa-file-arrow-up';
+        $pageTitle = 'Upload & Scan Policy';
+        $crumbs = [
+            ['label' => 'Policies', 'icon' => 'fa-file-shield', 'href' => 'policy_entries.php']
+        ];
+        $pageActions = [
+            ['label' => 'Policy List', 'icon' => 'fa-list', 'onclick' => "window.location='policy_entries.php'"],
+            ['label' => 'Dashboard', 'icon' => 'fa-gauge-high', 'onclick' => "window.location='dashboard.php'"]
+        ];
+        include 'page_header.php';
+        ?>
+
+        <div class="upload-card-wrapper">
+            <div class="upload-clean-card">
+                <!-- Center Top Icon & Heading (Exact Match to Screenshot) -->
+                <div class="icon-top-badge">
+                    <i class="fas fa-file-arrow-up"></i>
                 </div>
-            <?php endif; ?>
+                <h1 class="card-heading">Upload Insurance Policy</h1>
+                <p class="card-subheading">Upload any client policy PDF or image. AI will extract coverage and schedule expiry reminders.</p>
 
-            <!-- Dual Entry Mode Switcher Tabs -->
-            <div class="entry-mode-bar">
-                <button type="button" class="mode-tab-btn active" id="btnModeScan" onclick="setEntryMode('scan')">
-                    <i class="fas fa-file-arrow-up"></i> AI PDF / Document Scan
-                </button>
-                <button type="button" class="mode-tab-btn" id="btnModeManual" onclick="setEntryMode('manual')">
-                    <i class="fas fa-keyboard"></i> Direct Manual Entry
-                </button>
-            </div>
+                <?php if ($error): ?>
+                    <div style="background: #fef2f2; border: 1px solid #fecaca; color: #991b1b; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; display: flex; align-items: center; gap: 8px; font-size: 13.5px;">
+                        <i class="fas fa-exclamation-triangle"></i>
+                        <div><?php echo htmlspecialchars($error); ?></div>
+                    </div>
+                <?php endif; ?>
 
-            <form method="POST" action="policy_upload.php" enctype="multipart/form-data" id="uploadForm">
-                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                <input type="hidden" name="entry_mode" id="entry_mode" value="scan">
-                <input type="hidden" name="insurance_category" id="selected_insurance_category" value="motor">
-
-                <!-- 1. Insurance Category (Exact Match to Screenshot) -->
-                <div class="section-header">
-                    <i class="fas fa-shield-halved"></i>
-                    <span>Insurance Category</span>
-                </div>
-                <div class="category-grid">
-                    <div class="cat-tile active" id="card_motor" onclick="selectCategory('motor')">
-                        <div class="cat-radio"></div>
-                        <div class="cat-icon"><i class="fas fa-car"></i></div>
-                        <div class="cat-title">Motor Insurance</div>
-                    </div>
-                    <div class="cat-tile" id="card_health" onclick="selectCategory('health')">
-                        <div class="cat-radio"></div>
-                        <div class="cat-icon"><i class="fas fa-heart-pulse"></i></div>
-                        <div class="cat-title">Health Insurance</div>
-                    </div>
-                    <div class="cat-tile" id="card_life" onclick="selectCategory('life')">
-                        <div class="cat-radio"></div>
-                        <div class="cat-icon"><i class="fas fa-shield-heart"></i></div>
-                        <div class="cat-title">Life Insurance</div>
-                    </div>
+                <!-- Dual Entry Mode Switcher Tabs -->
+                <div class="entry-mode-bar">
+                    <button type="button" class="mode-tab-btn active" id="btnModeScan" onclick="setEntryMode('scan')">
+                        <i class="fas fa-file-arrow-up"></i> AI PDF / Document Scan
+                    </button>
+                    <button type="button" class="mode-tab-btn" id="btnModeManual" onclick="setEntryMode('manual')">
+                        <i class="fas fa-keyboard"></i> Direct Manual Entry
+                    </button>
                 </div>
 
-                <!-- Staff Agent Assignment (Staff/Admin Only) -->
-                <?php if ($role !== 'agent'): ?>
-                    <div style="margin-bottom: 18px;">
-                        <div class="section-header">
-                            <i class="fas fa-user-tie"></i>
-                            <span>Assign to Agent (Optional)</span>
+                <form method="POST" action="policy_upload.php" enctype="multipart/form-data" id="uploadForm">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                    <input type="hidden" name="entry_mode" id="entry_mode" value="scan">
+                    <input type="hidden" name="insurance_category" id="selected_insurance_category" value="motor">
+
+                    <!-- 1. Insurance Category (Exact Match to Screenshot) -->
+                    <div class="section-header">
+                        <i class="fas fa-shield-halved"></i>
+                        <span>Insurance Category</span>
+                    </div>
+                    <div class="category-grid">
+                        <div class="cat-tile active" id="card_motor" onclick="selectCategory('motor')">
+                            <div class="cat-radio"></div>
+                            <div class="cat-icon"><i class="fas fa-car"></i></div>
+                            <div class="cat-title">Motor Insurance</div>
                         </div>
-                        <select name="agent_id" id="agent_id" class="form-control-select">
-                            <option value="">-- Direct Company / In-House Policy (No Agent) --</option>
-                            <?php foreach ($agentsList as $ag): ?>
-                                <option value="<?php echo $ag['id']; ?>">
-                                    <?php echo htmlspecialchars($ag['name']); ?> (<?php echo htmlspecialchars($ag['agent_code']); ?>)
+                        <div class="cat-tile" id="card_health" onclick="selectCategory('health')">
+                            <div class="cat-radio"></div>
+                            <div class="cat-icon"><i class="fas fa-heart-pulse"></i></div>
+                            <div class="cat-title">Health Insurance</div>
+                        </div>
+                        <div class="cat-tile" id="card_life" onclick="selectCategory('life')">
+                            <div class="cat-radio"></div>
+                            <div class="cat-icon"><i class="fas fa-shield-heart"></i></div>
+                            <div class="cat-title">Life Insurance</div>
+                        </div>
+                    </div>
+
+                    <!-- Staff Agent Assignment (Staff/Admin Only) -->
+                    <?php if ($role !== 'agent'): ?>
+                        <div style="margin-bottom: 18px;">
+                            <div class="section-header">
+                                <i class="fas fa-user-tie"></i>
+                                <span>Assign to Agent (Optional)</span>
+                            </div>
+                            <select name="agent_id" id="agent_id" class="form-control-select">
+                                <option value="">-- Direct Company / In-House Policy (No Agent) --</option>
+                                <?php foreach ($agentsList as $ag): ?>
+                                    <option value="<?php echo $ag['id']; ?>">
+                                        <?php echo htmlspecialchars($ag['name']); ?> (<?php echo htmlspecialchars($ag['agent_code']); ?>)
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    <?php endif; ?>
+
+                    <!-- 2. Select Existing Customer (Exact Match to Screenshot) -->
+                    <div style="margin-bottom: 10px;">
+                        <div class="section-header">
+                            <i class="fas fa-user"></i>
+                            <span>Select Existing Customer</span>
+                        </div>
+                        <select id="customer_id" name="customer_id" class="form-control-select" onchange="toggleNewCustomerBox(this.value)">
+                            <option value="">-- Choose Existing Customer or Add New Below --</option>
+                            <?php foreach ($customers as $c): ?>
+                                <option value="<?php echo $c['id']; ?>" <?php echo ($selectedCustId === (int)$c['id']) ? 'selected' : ''; ?>>
+                                    <?php echo htmlspecialchars($c['name']); ?> — <?php echo htmlspecialchars($c['mobile']); ?> <?php if (!empty($c['email'])) echo '(' . htmlspecialchars($c['email']) . ')'; ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
                     </div>
-                <?php endif; ?>
 
-                <!-- 2. Select Existing Customer (Exact Match to Screenshot) -->
-                <div style="margin-bottom: 10px;">
-                    <div class="section-header">
-                        <i class="fas fa-user"></i>
-                        <span>Select Existing Customer</span>
-                    </div>
-                    <select id="customer_id" name="customer_id" class="form-control-select" onchange="toggleNewCustomerBox(this.value)">
-                        <option value="">-- Choose Existing Customer or Add New Below --</option>
-                        <?php foreach ($customers as $c): ?>
-                            <option value="<?php echo $c['id']; ?>" <?php echo ($selectedCustId === (int)$c['id']) ? 'selected' : ''; ?>>
-                                <?php echo htmlspecialchars($c['name']); ?> — <?php echo htmlspecialchars($c['mobile']); ?> <?php if (!empty($c['email'])) echo '(' . htmlspecialchars($c['email']) . ')'; ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
-                </div>
-
-                <!-- 2b. Quick Add Customer Box (Exact Match to Screenshot) -->
-                <div class="new-cust-box" id="newCustBox">
-                    <div class="new-cust-header">
-                        <i class="fas fa-user-plus" style="color: #0284c7;"></i>
-                        <span>+ Or Add New Customer Quickly</span>
-                    </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 10px;">
-                        <div>
-                            <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;">Customer Full Name</label>
-                            <input type="text" name="new_customer_name" id="new_customer_name" class="form-control-input" placeholder="e.g. Mukesh Patel">
+                    <!-- 2b. Quick Add Customer Box (Exact Match to Screenshot) -->
+                    <div class="new-cust-box" id="newCustBox">
+                        <div class="new-cust-header">
+                            <i class="fas fa-user-plus" style="color: #0284c7;"></i>
+                            <span>+ Or Add New Customer Quickly</span>
+                        </div>
+                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 10px;">
+                            <div>
+                                <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;">Customer Full Name</label>
+                                <input type="text" name="new_customer_name" id="new_customer_name" class="form-control-input" placeholder="e.g. Mukesh Patel">
+                            </div>
+                            <div>
+                                <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;">Mobile Number</label>
+                                <input type="tel" name="new_customer_mobile" id="new_customer_mobile" class="form-control-input" placeholder="10-digit mobile" maxlength="10">
+                            </div>
                         </div>
                         <div>
-                            <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;">Mobile Number</label>
-                            <input type="tel" name="new_customer_mobile" id="new_customer_mobile" class="form-control-input" placeholder="10-digit mobile" maxlength="10">
+                            <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;">Email Address (Optional)</label>
+                            <input type="email" name="new_customer_email" id="new_customer_email" class="form-control-input" placeholder="mukesh@example.com">
                         </div>
                     </div>
-                    <div>
-                        <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;">Email Address (Optional)</label>
-                        <input type="email" name="new_customer_email" id="new_customer_email" class="form-control-input" placeholder="mukesh@example.com">
-                    </div>
-                </div>
 
-                <!-- ============================================== -->
-                <!-- MODE 1: AI PDF / DOCUMENT SCAN SECTION         -->
-                <!-- ============================================== -->
-                <div id="secScanMode">
-                    <!-- 3. Policy Document File Dropzone (Exact Match to Screenshot) -->
-                    <div class="section-header">
-                        <i class="fas fa-file-pdf"></i>
-                        <span>Policy Document File *</span>
-                    </div>
-
-                    <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
-                        <i class="fas fa-cloud-arrow-up dropzone-cloud-icon"></i>
-                        <h4 class="dropzone-title" id="dropTitle">Click to browse or drag & drop policy file here</h4>
-                        <p class="dropzone-sub">Supported formats: PDF, JPG, JPEG, PNG (Max 15 MB)</p>
-                        <input type="file" id="fileInput" name="policy_document" accept="application/pdf,image/jpeg,image/png,image/webp" style="display:none;" onchange="handleFileSelected(this)">
-                    </div>
-
-                    <!-- Selected File Banner -->
-                    <div id="fileSelectedBadge" style="display: none; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 10px 14px; font-size: 13.5px; margin-bottom: 16px; align-items: center; justify-content: space-between;">
-                        <div style="display: flex; align-items: center; gap: 8px; color: #166534; font-weight: 600;">
-                            <i class="fas fa-paperclip"></i>
-                            <span id="selectedFileName">file.pdf</span>
-                            <span style="font-size: 12px; color: #15803d; font-weight: normal;">(<span id="selectedFileSize">0 MB</span>)</span>
-                        </div>
-                        <button type="button" onclick="clearSelectedFile()" style="background: none; border: 1px solid #86efac; color: #166534; border-radius: 5px; padding: 3px 8px; font-size: 11.5px; cursor: pointer;">
-                            Change
-                        </button>
-                    </div>
-
-                    <!-- Automatic AI Policy Scanning Card (Exact Match to Screenshot) -->
-                    <div class="toggle-switch-card">
-                        <input type="checkbox" id="run_ai_scan" name="run_ai_scan" value="1" checked>
-                        <label for="run_ai_scan" style="cursor: pointer;">
-                            <div class="toggle-title">Automatic AI Policy Scanning</div>
-                            <div class="toggle-desc">
-                                Instantly extract Policy Number, Premium, Start/End Dates, Insurer, and Insured details for rapid verification.
-                            </div>
-                        </label>
-                    </div>
-                </div>
-
-                <!-- ============================================== -->
-                <!-- MODE 2: DIRECT MANUAL POLICY ENTRY SECTION     -->
-                <!-- ============================================== -->
-                <div id="secManualMode" style="display: none;">
-                    <div class="manual-section-card">
-                        <div style="font-size: 13.5px; font-weight: 700; color: #001f3f; margin-bottom: 14px; display: flex; align-items: center; gap: 7px;">
-                            <i class="fas fa-file-invoice" style="color: #0284c7;"></i>
-                            <span>Policy & Coverage Details (Manual Entry)</span>
+                    <!-- ============================================== -->
+                    <!-- MODE 1: AI PDF / DOCUMENT SCAN SECTION         -->
+                    <!-- ============================================== -->
+                    <div id="secScanMode">
+                        <!-- 3. Policy Document File Dropzone (Exact Match to Screenshot) -->
+                        <div class="section-header">
+                            <i class="fas fa-file-pdf"></i>
+                            <span>Policy Document File *</span>
                         </div>
 
-                        <!-- Insurer & Policy Number -->
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
-                            <div>
-                                <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;">Insurance Company *</label>
-                                <input type="text" name="company_name" id="manual_company_name" list="insurerSuggestions" class="form-control-input" placeholder="e.g. HDFC ERGO / ICICI Lombard">
-                                <datalist id="insurerSuggestions">
-                                    <option value="HDFC ERGO General Insurance">
-                                    <option value="ICICI Lombard General Insurance">
-                                    <option value="Bajaj Allianz General Insurance">
-                                    <option value="Tata AIG General Insurance">
-                                    <option value="Star Health and Allied Insurance">
-                                    <option value="The New India Assurance Co. Ltd.">
-                                    <option value="Care Health Insurance">
-                                    <option value="Go Digit General Insurance">
-                                    <option value="National Insurance Company Ltd.">
-                                    <option value="United India Insurance Co. Ltd.">
-                                    <option value="SBI General Insurance">
-                                </datalist>
-                            </div>
-                            <div>
-                                <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;">Policy Number *</label>
-                                <input type="text" name="policy_number" id="manual_policy_number" class="form-control-input" placeholder="e.g. 2312/1234567/00/000">
-                            </div>
+                        <div class="dropzone" id="dropzone" onclick="document.getElementById('fileInput').click()">
+                            <i class="fas fa-cloud-arrow-up dropzone-cloud-icon"></i>
+                            <h4 class="dropzone-title" id="dropTitle">Click to browse or drag & drop policy file here</h4>
+                            <p class="dropzone-sub">Supported formats: PDF, JPG, JPEG, PNG (Max 15 MB)</p>
+                            <input type="file" id="fileInput" name="policy_document" accept="application/pdf,image/jpeg,image/png,image/webp" style="display:none;" onchange="handleFileSelected(this)">
                         </div>
 
-                        <!-- Policy Type & Business Type -->
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
-                            <div>
-                                <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;">Policy Type</label>
-                                <select name="policy_type" id="manual_policy_type" class="form-control-select">
-                                    <option value="comprehensive">Comprehensive Package</option>
-                                    <option value="third_party">Third Party (TP) Only</option>
-                                    <option value="own_damage">Standalone Own Damage (OD)</option>
-                                    <option value="floater">Family Floater</option>
-                                    <option value="individual">Individual Mediclaim</option>
-                                    <option value="term_life">Term Life Plan</option>
-                                </select>
+                        <!-- Selected File Banner -->
+                        <div id="fileSelectedBadge" style="display: none; background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 10px 14px; font-size: 13.5px; margin-bottom: 16px; align-items: center; justify-content: space-between;">
+                            <div style="display: flex; align-items: center; gap: 8px; color: #166534; font-weight: 600;">
+                                <i class="fas fa-paperclip"></i>
+                                <span id="selectedFileName">file.pdf</span>
+                                <span style="font-size: 12px; color: #15803d; font-weight: normal;">(<span id="selectedFileSize">0 MB</span>)</span>
                             </div>
-                            <div>
-                                <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;">Business Type</label>
-                                <select name="business_type" id="manual_business_type" class="form-control-select">
-                                    <option value="new">New Policy</option>
-                                    <option value="renewal">Renewal Policy</option>
-                                    <option value="rollover">Rollover Policy</option>
-                                </select>
-                            </div>
+                            <button type="button" onclick="clearSelectedFile()" style="background: none; border: 1px solid #86efac; color: #166534; border-radius: 5px; padding: 3px 8px; font-size: 11.5px; cursor: pointer;">
+                                Change
+                            </button>
                         </div>
 
-                        <!-- Dates -->
-                        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
-                            <div>
-                                <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;">Policy Start Date *</label>
-                                <input type="date" name="policy_start_date" id="manual_start_date" class="form-control-input" value="<?php echo date('Y-m-d'); ?>" onchange="autoCalculateEndDate(this.value)">
-                            </div>
-                            <div>
-                                <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;">Policy Expiry Date *</label>
-                                <input type="date" name="policy_end_date" id="manual_end_date" class="form-control-input" value="<?php echo date('Y-m-d', strtotime('+1 year -1 day')); ?>">
-                            </div>
+                        <!-- Automatic AI Policy Scanning Card (Exact Match to Screenshot) -->
+                        <div class="toggle-switch-card">
+                            <input type="checkbox" id="run_ai_scan" name="run_ai_scan" value="1" checked>
+                            <label for="run_ai_scan" style="cursor: pointer;">
+                                <div class="toggle-title">Automatic AI Policy Scanning</div>
+                                <div class="toggle-desc">
+                                    Instantly extract Policy Number, Premium, Start/End Dates, Insurer, and Insured details for rapid verification.
+                                </div>
+                            </label>
                         </div>
+                    </div>
 
-                        <!-- Premium Calculation Breakdown -->
-                        <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
-                            <div style="font-size: 12px; font-weight: 700; color: #001f3f; margin-bottom: 8px;">
-                                <i class="fas fa-calculator" style="color: #0284c7;"></i> Premium Breakdown (₹)
+                    <!-- ============================================== -->
+                    <!-- MODE 2: DIRECT MANUAL POLICY ENTRY SECTION     -->
+                    <!-- ============================================== -->
+                    <div id="secManualMode" style="display: none;">
+                        <div class="manual-section-card">
+                            <div style="font-size: 13.5px; font-weight: 700; color: #001f3f; margin-bottom: 14px; display: flex; align-items: center; gap: 7px;">
+                                <i class="fas fa-file-invoice" style="color: #0284c7;"></i>
+                                <span>Policy & Coverage Details (Manual Entry)</span>
                             </div>
-                            <div style="display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 10px;">
+
+                            <!-- Insurer & Policy Number -->
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                                <div>
+                                    <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;">Insurance Company *</label>
+                                    <input type="text" name="company_name" id="manual_company_name" list="insurerSuggestions" class="form-control-input" placeholder="e.g. HDFC ERGO / ICICI Lombard">
+                                    <datalist id="insurerSuggestions">
+                                        <option value="HDFC ERGO General Insurance">
+                                        <option value="ICICI Lombard General Insurance">
+                                        <option value="Bajaj Allianz General Insurance">
+                                        <option value="Tata AIG General Insurance">
+                                        <option value="Star Health and Allied Insurance">
+                                        <option value="The New India Assurance Co. Ltd.">
+                                        <option value="Care Health Insurance">
+                                        <option value="Go Digit General Insurance">
+                                        <option value="National Insurance Company Ltd.">
+                                        <option value="United India Insurance Co. Ltd.">
+                                        <option value="SBI General Insurance">
+                                    </datalist>
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;">Policy Number *</label>
+                                    <input type="text" name="policy_number" id="manual_policy_number" class="form-control-input" placeholder="e.g. 2312/1234567/00/000">
+                                </div>
+                            </div>
+
+                            <!-- Policy Type & Business Type -->
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                                <div>
+                                    <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;">Policy Type</label>
+                                    <select name="policy_type" id="manual_policy_type" class="form-control-select">
+                                        <option value="comprehensive">Comprehensive Package</option>
+                                        <option value="third_party">Third Party (TP) Only</option>
+                                        <option value="own_damage">Standalone Own Damage (OD)</option>
+                                        <option value="floater">Family Floater</option>
+                                        <option value="individual">Individual Mediclaim</option>
+                                        <option value="term_life">Term Life Plan</option>
+                                    </select>
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;">Business Type</label>
+                                    <select name="business_type" id="manual_business_type" class="form-control-select">
+                                        <option value="new">New Policy</option>
+                                        <option value="renewal">Renewal Policy</option>
+                                        <option value="rollover">Rollover Policy</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <!-- Dates -->
+                            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+                                <div>
+                                    <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;">Policy Start Date *</label>
+                                    <input type="date" name="policy_start_date" id="manual_start_date" class="form-control-input" value="<?php echo date('Y-m-d'); ?>" onchange="autoCalculateEndDate(this.value)">
+                                </div>
+                                <div>
+                                    <label style="display: block; font-size: 12px; font-weight: 600; color: #64748b; margin-bottom: 4px;">Policy Expiry Date *</label>
+                                    <input type="date" name="policy_end_date" id="manual_end_date" class="form-control-input" value="<?php echo date('Y-m-d', strtotime('+1 year -1 day')); ?>">
+                                </div>
+                            </div>
+
+                            <!-- Premium Calculation Breakdown -->
+                            <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-bottom: 12px;">
+                                <div style="font-size: 12px; font-weight: 700; color: #001f3f; margin-bottom: 8px;">
+                                    <i class="fas fa-calculator" style="color: #0284c7;"></i> Premium Breakdown (₹)
+                                </div>
+                                <div style="display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 10px;">
                                 <div>
                                     <label style="display: block; font-size: 11px; font-weight: 600; color: #64748b; margin-bottom: 3px;">Net Premium</label>
                                     <input type="number" step="0.01" name="net_premium_amount" id="manual_net_premium" class="form-control-input" placeholder="0.00" oninput="calcTotalPremium()">
@@ -1140,161 +1204,163 @@ $categories = getInsuranceCategories($conn, true);
             </form>
         </div>
     </div>
+</div>
+</div>
 
-    <script>
-    let currentEntryMode = 'scan';
-    let currentCategory = 'motor';
+<script>
+let currentEntryMode = 'scan';
+let currentCategory = 'motor';
 
-    function setEntryMode(mode) {
-        currentEntryMode = mode;
-        document.getElementById('entry_mode').value = mode;
+function setEntryMode(mode) {
+    currentEntryMode = mode;
+    document.getElementById('entry_mode').value = mode;
 
-        const btnScan = document.getElementById('btnModeScan');
-        const btnManual = document.getElementById('btnModeManual');
-        const secScan = document.getElementById('secScanMode');
-        const secManual = document.getElementById('secManualMode');
-        const btnSubmit = document.getElementById('btnSubmit');
-        const btnText = document.getElementById('submitBtnText');
-        const btnIcon = document.getElementById('submitBtnIcon');
+    const btnScan = document.getElementById('btnModeScan');
+    const btnManual = document.getElementById('btnModeManual');
+    const secScan = document.getElementById('secScanMode');
+    const secManual = document.getElementById('secManualMode');
+    const btnSubmit = document.getElementById('btnSubmit');
+    const btnText = document.getElementById('submitBtnText');
+    const btnIcon = document.getElementById('submitBtnIcon');
 
-        const manualComp = document.getElementById('manual_company_name');
-        const manualPol = document.getElementById('manual_policy_number');
-        const manualPrem = document.getElementById('manual_total_premium');
+    const manualComp = document.getElementById('manual_company_name');
+    const manualPol = document.getElementById('manual_policy_number');
+    const manualPrem = document.getElementById('manual_total_premium');
 
-        if (mode === 'manual') {
-            btnManual.classList.add('active');
-            btnScan.classList.remove('active');
-            secScan.style.display = 'none';
-            secManual.style.display = 'block';
+    if (mode === 'manual') {
+        btnManual.classList.add('active');
+        btnScan.classList.remove('active');
+        secScan.style.display = 'none';
+        secManual.style.display = 'block';
 
-            btnText.textContent = 'Save & Activate Policy';
-            btnIcon.className = 'fas fa-check-circle';
-            btnSubmit.style.background = '#047857';
+        btnText.textContent = 'Save & Activate Policy';
+        btnIcon.className = 'fas fa-check-circle';
+        btnSubmit.style.background = '#047857';
 
-            if (manualComp) manualComp.required = true;
-            if (manualPol) manualPol.required = true;
-            if (manualPrem) manualPrem.required = true;
+        if (manualComp) manualComp.required = true;
+        if (manualPol) manualPol.required = true;
+        if (manualPrem) manualPrem.required = true;
+    } else {
+        btnScan.classList.add('active');
+        btnManual.classList.remove('active');
+        secScan.style.display = 'block';
+        secManual.style.display = 'none';
+
+        btnText.textContent = 'Upload & Start Policy Verification';
+        btnIcon.className = 'fas fa-cloud-arrow-up';
+        btnSubmit.style.background = '#001f3f';
+
+        if (manualComp) manualComp.required = false;
+        if (manualPol) manualPol.required = false;
+        if (manualPrem) manualPrem.required = false;
+    }
+}
+
+function selectCategory(code) {
+    currentCategory = code;
+    document.getElementById('selected_insurance_category').value = code;
+
+    document.querySelectorAll('.cat-tile').forEach(c => c.classList.remove('active'));
+    const target = document.getElementById('card_' + code);
+    if (target) target.classList.add('active');
+
+    // Toggle category blocks in manual mode
+    const secMotor = document.getElementById('secCategoryMotor');
+    const secHealth = document.getElementById('secCategoryHealth');
+    const secLife = document.getElementById('secCategoryLife');
+
+    if (secMotor) secMotor.style.display = (code === 'motor') ? 'block' : 'none';
+    if (secHealth) secHealth.style.display = (code === 'health') ? 'block' : 'none';
+    if (secLife) secLife.style.display = (code === 'life') ? 'block' : 'none';
+}
+
+function toggleNewCustomerBox(val) {
+    const box = document.getElementById('newCustBox');
+    if (val && parseInt(val) > 0) {
+        box.style.display = 'none';
+    } else {
+        box.style.display = 'block';
+    }
+}
+
+function calcTotalPremium() {
+    const net = parseFloat(document.getElementById('manual_net_premium').value) || 0;
+    const gstInput = document.getElementById('manual_gst_amount');
+    let gst = parseFloat(gstInput.value);
+
+    if (isNaN(gst) || gst === 0) {
+        if (net > 0) {
+            gst = Math.round(net * 0.18 * 100) / 100;
+            gstInput.value = gst.toFixed(2);
         } else {
-            btnScan.classList.add('active');
-            btnManual.classList.remove('active');
-            secScan.style.display = 'block';
-            secManual.style.display = 'none';
-
-            btnText.textContent = 'Upload & Start Policy Verification';
-            btnIcon.className = 'fas fa-cloud-arrow-up';
-            btnSubmit.style.background = '#001f3f';
-
-            if (manualComp) manualComp.required = false;
-            if (manualPol) manualPol.required = false;
-            if (manualPrem) manualPrem.required = false;
+            gst = 0;
         }
     }
 
-    function selectCategory(code) {
-        currentCategory = code;
-        document.getElementById('selected_insurance_category').value = code;
-
-        document.querySelectorAll('.cat-tile').forEach(c => c.classList.remove('active'));
-        const target = document.getElementById('card_' + code);
-        if (target) target.classList.add('active');
-
-        // Toggle category blocks in manual mode
-        const secMotor = document.getElementById('secCategoryMotor');
-        const secHealth = document.getElementById('secCategoryHealth');
-        const secLife = document.getElementById('secCategoryLife');
-
-        if (secMotor) secMotor.style.display = (code === 'motor') ? 'block' : 'none';
-        if (secHealth) secHealth.style.display = (code === 'health') ? 'block' : 'none';
-        if (secLife) secLife.style.display = (code === 'life') ? 'block' : 'none';
+    const total = net + gst;
+    if (total > 0) {
+        document.getElementById('manual_total_premium').value = total.toFixed(2);
     }
+}
 
-    function toggleNewCustomerBox(val) {
-        const box = document.getElementById('newCustBox');
-        if (val && parseInt(val) > 0) {
-            box.style.display = 'none';
-        } else {
-            box.style.display = 'block';
-        }
-    }
+function autoCalculateEndDate(startVal) {
+    if (!startVal) return;
+    const dt = new Date(startVal);
+    dt.setFullYear(dt.getFullYear() + 1);
+    dt.setDate(dt.getDate() - 1);
+    const y = dt.getFullYear();
+    const m = String(dt.getMonth() + 1).padStart(2, '0');
+    const d = String(dt.getDate()).padStart(2, '0');
+    document.getElementById('manual_end_date').value = `${y}-${m}-${d}`;
+}
 
-    function calcTotalPremium() {
-        const net = parseFloat(document.getElementById('manual_net_premium').value) || 0;
-        const gstInput = document.getElementById('manual_gst_amount');
-        let gst = parseFloat(gstInput.value);
-
-        if (isNaN(gst) || gst === 0) {
-            if (net > 0) {
-                gst = Math.round(net * 0.18 * 100) / 100;
-                gstInput.value = gst.toFixed(2);
-            } else {
-                gst = 0;
-            }
-        }
-
-        const total = net + gst;
-        if (total > 0) {
-            document.getElementById('manual_total_premium').value = total.toFixed(2);
-        }
-    }
-
-    function autoCalculateEndDate(startVal) {
-        if (!startVal) return;
-        const dt = new Date(startVal);
-        dt.setFullYear(dt.getFullYear() + 1);
-        dt.setDate(dt.getDate() - 1);
-        const y = dt.getFullYear();
-        const m = String(dt.getMonth() + 1).padStart(2, '0');
-        const d = String(dt.getDate()).padStart(2, '0');
-        document.getElementById('manual_end_date').value = `${y}-${m}-${d}`;
-    }
-
-    // Drag & Drop
-    const dropzone = document.getElementById('dropzone');
-    if (dropzone) {
-        ['dragenter', 'dragover'].forEach(evt => {
-            dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
-        });
-        ['dragleave', 'drop'].forEach(evt => {
-            dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.remove('dragover'); });
-        });
-        dropzone.addEventListener('drop', (e) => {
-            e.preventDefault();
-            dropzone.classList.remove('dragover');
-            const files = e.dataTransfer.files;
-            if (files && files.length) {
-                const fileInput = document.getElementById('fileInput');
-                fileInput.files = files;
-                handleFileSelected(fileInput);
-            }
-        });
-    }
-
-    function handleFileSelected(input) {
-        if (input.files && input.files[0]) {
-            const file = input.files[0];
-            document.getElementById('selectedFileName').textContent = file.name;
-            document.getElementById('selectedFileSize').textContent = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
-            document.getElementById('dropzone').style.display = 'none';
-            document.getElementById('fileSelectedBadge').style.display = 'flex';
-        }
-    }
-
-    function clearSelectedFile() {
-        const input = document.getElementById('fileInput');
-        input.value = '';
-        document.getElementById('dropzone').style.display = 'block';
-        document.getElementById('fileSelectedBadge').style.display = 'none';
-    }
-
-    document.getElementById('uploadForm').addEventListener('submit', function() {
-        const btn = document.getElementById('btnSubmit');
-        btn.disabled = true;
-        if (currentEntryMode === 'manual') {
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving Policy & Scheduling Reminders...';
-        } else {
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading & Analyzing Document...';
+// Drag & Drop
+const dropzone = document.getElementById('dropzone');
+if (dropzone) {
+    ['dragenter', 'dragover'].forEach(evt => {
+        dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.add('dragover'); });
+    });
+    ['dragleave', 'drop'].forEach(evt => {
+        dropzone.addEventListener(evt, (e) => { e.preventDefault(); dropzone.classList.remove('dragover'); });
+    });
+    dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.classList.remove('dragover');
+        const files = e.dataTransfer.files;
+        if (files && files.length) {
+            const fileInput = document.getElementById('fileInput');
+            fileInput.files = files;
+            handleFileSelected(fileInput);
         }
     });
-    </script>
+}
+
+function handleFileSelected(input) {
+    if (input.files && input.files[0]) {
+        const file = input.files[0];
+        document.getElementById('selectedFileName').textContent = file.name;
+        document.getElementById('selectedFileSize').textContent = (file.size / (1024 * 1024)).toFixed(2) + ' MB';
+        document.getElementById('dropzone').style.display = 'none';
+        document.getElementById('fileSelectedBadge').style.display = 'flex';
+    }
+}
+
+function clearSelectedFile() {
+    const input = document.getElementById('fileInput');
+    input.value = '';
+    document.getElementById('dropzone').style.display = 'block';
+    document.getElementById('fileSelectedBadge').style.display = 'none';
+}
+
+document.getElementById('uploadForm').addEventListener('submit', function() {
+    const btn = document.getElementById('btnSubmit');
+    btn.disabled = true;
+    if (currentEntryMode === 'manual') {
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving Policy & Scheduling Reminders...';
+    } else {
+        btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading & Analyzing Document...';
+    }
+});
+</script>
 </body>
 </html>
