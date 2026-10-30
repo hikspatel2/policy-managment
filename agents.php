@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Developed by Rudees Digital
  * Website: https://rudeesdigital.com
@@ -274,12 +274,17 @@ if (isset($_GET['action'])) {
                     echo json_encode(['success' => false, 'message' => 'Agent code is required']);
                     exit();
                 }
-                // agent owns a login account — email + pwd required
-                if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                // agent owns a login account — email + pwd (auto-generated if blank)
+                if (!empty($email) && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
                     echo json_encode(['success' => false, 'message' => 'Valid email is required for agent login']);
                     exit();
                 }
-                if (strlen($password) < 6) {
+                if (empty($email)) {
+                    $email = strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $agentCode)) . '@agent.local';
+                }
+                if (empty($password)) {
+                    $password = 'Agt@' . rand(1000, 9999);
+                } elseif (strlen($password) < 6) {
                     echo json_encode(['success' => false, 'message' => 'Password must be at least 6 characters']);
                     exit();
                 }
@@ -345,7 +350,18 @@ if (isset($_GET['action'])) {
 
                 logActivity($user_id, $username, 'Agent Created', "Created agent: $name ($agentCode), TDS $tdsRate%" . ($licNo ? ", licence $licNo" . ($licExp ? " exp $licExp" : '') : ''));
                 $conn->close();
-                echo json_encode(['success' => true, 'message' => 'Agent added successfully', 'data' => ['id' => $insertId]]);
+                echo json_encode([
+                    'success' => true,
+                    'message' => 'Agent added successfully',
+                    'data' => [
+                        'id' => $insertId,
+                        'agent_code' => $agentCode,
+                        'name' => $name,
+                        'email' => $email,
+                        'mobile' => $mobile,
+                        'password' => $password
+                    ]
+                ]);
                 exit();
 
             case 'bulkAddAgents':
@@ -451,6 +467,78 @@ if (isset($_GET['action'])) {
                 $conn->close();
                 $msg = "$inserted agent(s) added successfully." . (count($errors) ? " " . count($errors) . " row(s) skipped." : "");
                 echo json_encode(['success'=>true, 'message'=>$msg, 'inserted'=>$inserted, 'errors'=>$errors]);
+                exit();
+
+            case 'resetAgentPassword':
+                if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
+                    echo json_encode(['success' => false, 'message' => 'Invalid request']);
+                    exit();
+                }
+                if (!validateCSRFToken($_POST['csrf_token'] ?? '')) { echo json_encode(['success'=>false,'message'=>'Invalid request']); exit; }
+                if ($role !== 'admin') {
+                    echo json_encode(['success' => false, 'message' => 'Access denied']);
+                    exit();
+                }
+                $aid = (int)($_POST['id'] ?? 0);
+                if ($aid <= 0) {
+                    echo json_encode(['success' => false, 'message' => 'Invalid agent ID']);
+                    exit();
+                }
+                $pwd = trim($_POST['password'] ?? '');
+                if (empty($pwd)) {
+                    $pwd = 'Agt@' . rand(1000, 9999);
+                } elseif (strlen($pwd) < 6) {
+                    echo json_encode(['success' => false, 'message' => 'Password must be at least 6 characters']);
+                    exit();
+                }
+
+                $st = $conn->prepare("SELECT a.id, a.name, a.mobile, a.email, a.agent_code, a.user_id, u.id as u_id 
+                    FROM agents a LEFT JOIN users u ON u.id = a.user_id WHERE a.id = ?");
+                $st->bind_param("i", $aid);
+                $st->execute();
+                $ag = $st->get_result()->fetch_assoc();
+                $st->close();
+
+                if (!$ag) {
+                    $conn->close();
+                    echo json_encode(['success' => false, 'message' => 'Agent not found']);
+                    exit();
+                }
+
+                $hash = password_hash($pwd, PASSWORD_DEFAULT);
+                if (!empty($ag['u_id'])) {
+                    $up = $conn->prepare("UPDATE users SET password_hash = ?, password_changed_at = NOW() WHERE id = ?");
+                    $up->bind_param("si", $hash, $ag['u_id']);
+                    $up->execute();
+                    $up->close();
+                } else {
+                    $uEmail = !empty($ag['email']) ? $ag['email'] : strtolower(preg_replace('/[^a-zA-Z0-9]/', '', $ag['agent_code'])) . '@agent.local';
+                    $ins = $conn->prepare("INSERT INTO users (name, email, phone, password_hash, role, is_active, created_by, password_changed_at) VALUES (?, ?, ?, ?, 'agent', 1, ?, NOW())");
+                    $ins->bind_param("ssssi", $ag['name'], $uEmail, $ag['mobile'], $hash, $user_id);
+                    $ins->execute();
+                    $newUid = $ins->insert_id;
+                    $ins->close();
+
+                    $link = $conn->prepare("UPDATE agents SET user_id = ? WHERE id = ?");
+                    $link->bind_param("ii", $newUid, $aid);
+                    $link->execute();
+                    $link->close();
+                }
+
+                logActivity($user_id, $username, 'Agent Password Reset', "Reset password for agent: {$ag['name']} ({$ag['agent_code']})");
+                $conn->close();
+
+                echo json_encode([
+                    'success' => true,
+                    'message' => 'Password updated successfully',
+                    'data' => [
+                        'agent_code' => $ag['agent_code'],
+                        'name' => $ag['name'],
+                        'mobile' => $ag['mobile'],
+                        'email' => $ag['email'],
+                        'password' => $pwd
+                    ]
+                ]);
                 exit();
 
             case 'updateAgent':
@@ -813,12 +901,16 @@ if (isset($_GET['action'])) {
                             <input type="tel" id="agentMobile" name="mobile" required minlength="10" maxlength="15" placeholder="10-15 digits" pattern="\d{10,15}">
                         </div>
                         <div class="form-group">
-                            <label><i class="fas fa-envelope"></i> Email *</label>
-                            <input type="email" id="agentEmail" name="email" required placeholder="email@example.com">
+                            <label><i class="fas fa-envelope"></i> Email</label>
+                            <input type="email" id="agentEmail" name="email" placeholder="email@example.com (optional)">
                         </div>
                         <div class="form-group" id="agentPwdGroup">
-                            <label><i class="fas fa-lock"></i> Login Password *</label>
-                            <input type="password" id="agentPassword" name="password" minlength="6" placeholder="Min 6 characters">
+                            <label><i class="fas fa-lock"></i> Login Password</label>
+                            <div style="display:flex;gap:6px;">
+                                <input type="text" id="agentPassword" name="password" minlength="6" placeholder="Leave blank to auto-generate" style="flex:1;">
+                                <button type="button" class="btn btn-secondary" onclick="generateRandomPwd()" style="white-space:nowrap;" title="Generate Random Password"><i class="fas fa-key"></i> Generate</button>
+                            </div>
+                            <small class="text-muted" style="font-size:11px;">Auto-generated if left blank. Can be shared on WhatsApp.</small>
                         </div>
                         <div class="form-group">
                             <label><i class="fas fa-building"></i> Branch</label>
@@ -1081,6 +1173,7 @@ if (isset($_GET['action'])) {
                                 '<div class="more-dropdown">' +
                                 '<button class="more-item" data-act="charts" data-id="' + row.id + '"><i class="fas fa-chart-line"></i> Payout Charts</button>' +
                                 '<button class="more-item" data-act="whatsapp" data-id="' + row.id + '"><i class="fab fa-whatsapp"></i> WhatsApp</button>' +
+                                '<button class="more-item" data-act="reset-pwd" data-id="' + row.id + '"><i class="fas fa-key"></i> Login Credentials / Reset</button>' +
                                 '<div class="more-divider"></div>' +
                                 '<button class="more-item" data-act="edit" data-id="' + row.id + '"><i class="fas fa-pen"></i> Edit</button>' +
                                 '<div class="more-divider"></div>' +
@@ -1141,6 +1234,7 @@ if (isset($_GET['action'])) {
                 }
                 else if (act === 'edit') { if (rec) editAgent(rec); }
                 else if (act === 'delete') { deleteAgent(id); }
+                else if (act === 'reset-pwd') { resetAgentPasswordPrompt(id); }
             });
             applyFilters();
         }
@@ -1370,16 +1464,108 @@ if (isset($_GET['action'])) {
         });
 
         <?php if ($isAdmin): ?>
+        function generateRandomPwd() {
+            var p = 'Agt@' + Math.floor(1000 + Math.random() * 9000);
+            $('#agentPassword').val(p);
+        }
+
+        function showAgentCredentials(data) {
+            var loginId = data.email || data.agent_code;
+            var pwd = data.password;
+            var mob = data.mobile ? String(data.mobile).replace(/\D/g, '') : '';
+            var waMsg = encodeURIComponent(
+                "Hello " + data.name + ",\nYour Agent account has been created on Insurance Management System.\n\n" +
+                "Agent Code: " + data.agent_code + "\n" +
+                "Login ID: " + (data.agent_code || loginId) + " (or " + (data.mobile || loginId) + ")\n" +
+                "Password: " + pwd + "\n\n" +
+                "Please log in and update your password."
+            );
+            var waBtn = mob ? '<a href="https://wa.me/' + mob + '?text=' + waMsg + '" target="_blank" class="btn btn-success" style="background:#25D366;border-color:#25D366;color:#fff;display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:6px;text-decoration:none;font-weight:600;"><i class="fab fa-whatsapp"></i> Share on WhatsApp</a>' : '';
+
+            var copyAllText = "Agent Code: " + data.agent_code + "\\nAgent Name: " + data.name + "\\nLogin ID: " + loginId + "\\nPassword: " + pwd + (data.mobile ? "\\nMobile: " + data.mobile : "");
+
+            var credHtml = '<div style="text-align:left;background:#f8f9fa;border:1px solid #e2e8f0;border-radius:8px;padding:15px;margin:15px 0;font-size:13px;line-height:1.8;">' +
+                '<div><strong>Agent Code:</strong> <span class="badge-code">' + escapeHtml(data.agent_code) + '</span></div>' +
+                '<div><strong>Agent Name:</strong> ' + escapeHtml(data.name) + '</div>' +
+                '<div><strong>Login Username:</strong> <code style="font-size:14px;color:#0b2239;font-weight:bold;">' + escapeHtml(loginId) + '</code> <button type="button" class="btn btn-sm btn-secondary" onclick="navigator.clipboard.writeText(\'' + escapeHtml(loginId) + '\');" style="padding:1px 6px;font-size:11px;margin-left:5px;"><i class="fas fa-copy"></i> Copy</button></div>' +
+                '<div><strong>Password:</strong> <code style="font-size:15px;color:#d9534f;font-weight:bold;">' + escapeHtml(pwd) + '</code> <button type="button" class="btn btn-sm btn-secondary" onclick="navigator.clipboard.writeText(\'' + escapeHtml(pwd) + '\');" style="padding:1px 6px;font-size:11px;margin-left:5px;"><i class="fas fa-copy"></i> Copy</button></div>' +
+                (data.mobile ? '<div><strong>Mobile:</strong> ' + escapeHtml(data.mobile) + '</div>' : '') +
+                '</div>' +
+                '<div style="display:flex;gap:10px;justify-content:center;margin-top:12px;flex-wrap:wrap;">' +
+                waBtn +
+                '<button type="button" class="btn btn-primary" onclick="navigator.clipboard.writeText(\'' + copyAllText + '\');Swal.fire(\'Copied!\', \'Login credentials copied to clipboard\', \'success\');" style="display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:6px;"><i class="fas fa-copy"></i> Copy All Details</button>' +
+                '</div>';
+
+            Swal.fire({
+                icon: 'success',
+                title: 'Agent Credentials Ready!',
+                html: credHtml,
+                showConfirmButton: true,
+                confirmButtonText: 'Done'
+            });
+        }
+
+        function resetAgentPasswordPrompt(aid) {
+            var rec = agentsData.find(function(a) { return a.id == aid; });
+            var name = rec ? rec.name : 'Agent #' + aid;
+            var suggestedPwd = 'Agt@' + Math.floor(1000 + Math.random() * 9000);
+
+            Swal.fire({
+                title: 'Reset Password / Login',
+                html: '<p style="font-size:13px;color:#64748b;">Set or generate a new login password for <strong>' + escapeHtml(name) + '</strong>:</p>' +
+                      '<div style="display:flex;gap:6px;justify-content:center;margin-top:10px;">' +
+                      '<input type="text" id="swalAgentPwd" class="swal2-input" value="' + suggestedPwd + '" placeholder="Min 6 characters" style="max-width:240px;margin:0;font-family:monospace;font-weight:bold;">' +
+                      '<button type="button" class="btn btn-secondary" onclick="$(\'#swalAgentPwd\').val(\'Agt@\' + Math.floor(1000 + Math.random() * 9000));" style="white-space:nowrap;"><i class="fas fa-random"></i></button>' +
+                      '</div>',
+                showCancelButton: true,
+                confirmButtonText: '<i class="fas fa-save"></i> Save & Show Details',
+                cancelButtonText: 'Cancel',
+                preConfirm: function() {
+                    var p = $('#swalAgentPwd').val().trim();
+                    if (p.length < 6) {
+                        Swal.showValidationMessage('Password must be at least 6 characters');
+                        return false;
+                    }
+                    return p;
+                }
+            }).then(function(res) {
+                if (!res.isConfirmed || !res.value) return;
+                showLoading('Updating password...');
+                $.ajax({
+                    url: '?action=resetAgentPassword',
+                    method: 'POST',
+                    dataType: 'json',
+                    data: {
+                        id: aid,
+                        password: res.value,
+                        csrf_token: window.CSRF_TOKEN
+                    },
+                    success: function(resp) {
+                        hideLoading();
+                        if (resp.success && resp.data) {
+                            showAgentCredentials(resp.data);
+                        } else {
+                            Swal.fire('Error', resp.message || 'Failed to update password', 'error');
+                        }
+                    },
+                    error: function() {
+                        hideLoading();
+                        Swal.fire('Error', 'Connection failed', 'error');
+                    }
+                });
+            });
+        }
+
         function openAddModal() {
             isEditMode = false;
             $('#modalTitle').html('<i class="fas fa-user-plus"></i> Add Agent');
             $('#agentForm')[0].reset();
             $('#agentId').val('');
             $('#agentIsActive').prop('checked', true);
-            // add mode — pwd + email required (new login account)
+            // add mode — auto-generated if left blank, email optional
             $('#agentPwdGroup').show();
-            $('#agentPassword').prop('disabled', false).prop('required', true);
-            $('#agentEmail').prop('readonly', false).prop('required', true);
+            $('#agentPassword').prop('disabled', false).prop('required', false).val('');
+            $('#agentEmail').prop('readonly', false).prop('required', false);
             $('#statusGroup').hide();
             $('#agentModal').addClass('active');
             document.querySelectorAll('select.searchable').forEach(function(s) { if (s.sdRefresh) s.sdRefresh(); });
@@ -1456,8 +1642,12 @@ if (isset($_GET['action'])) {
                 success: function(res) {
                     hideLoading();
                     if (res.success) {
-                        Swal.fire({ icon: 'success', title: 'Success!', text: res.message, timer: 2000, showConfirmButton: false });
                         closeModal();
+                        if (!isEditMode && res.data && res.data.password) {
+                            showAgentCredentials(res.data);
+                        } else {
+                            Swal.fire({ icon: 'success', title: 'Success!', text: res.message, timer: 2000, showConfirmButton: false });
+                        }
                         setTimeout(loadAgents, 100);
                     } else {
                         Swal.fire({ icon: 'error', title: 'Error', text: res.message });

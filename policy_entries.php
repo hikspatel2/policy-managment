@@ -613,6 +613,11 @@ if (isset($_GET['action'])) {
                 $buyerBasis = trim($_POST['buyer_commission_basis'] ?? '');
                 $buyerRate = (float)($_POST['buyer_commission_rate'] ?? 0);
                 $buyerCommAmt = (float)($_POST['buyer_commission_amount'] ?? 0);
+                if ($isAgent && empty($buyerBasis)) {
+                    $buyerBasis = 'fixed';
+                    $buyerRate = 0.0;
+                    $buyerCommAmt = 0.0;
+                }
                 $policyStart = trim($_POST['policy_start_date'] ?? '');
                 $policyEnd = trim($_POST['policy_end_date'] ?? '');
                 $status = trim($_POST['status'] ?? 'active');
@@ -928,6 +933,11 @@ if (isset($_GET['action'])) {
                 $buyerBasis = trim($_POST['buyer_commission_basis'] ?? '');
                 $buyerRate = (float)($_POST['buyer_commission_rate'] ?? 0);
                 $buyerCommAmt = (float)($_POST['buyer_commission_amount'] ?? 0);
+                if ($isAgent && empty($buyerBasis)) {
+                    $buyerBasis = 'fixed';
+                    $buyerRate = 0.0;
+                    $buyerCommAmt = 0.0;
+                }
                 $policyStart = trim($_POST['policy_start_date'] ?? '');
                 $policyEnd = trim($_POST['policy_end_date'] ?? '');
                 $status = trim($_POST['status'] ?? 'active');
@@ -3396,7 +3406,15 @@ if ($isAdmin) {
         toggleVehicleMode();
         toggleCustomerMode();
         fillExtras({ insurance_category: 'motor' });
+        if (IS_AGENT && ddData && ddData.agents && ddData.agents.length > 0) {
+            var myAg = ddData.agents[0];
+            $('#fAgent').val(myAg.id);
+            $('#fAgentName').val(myAg.name);
+        }
         $('#policyModal').addClass('active');
+        setTimeout(function(){
+            document.querySelectorAll('#policyModal select.searchable').forEach(function(s){ if (s.sdRefresh) s.sdRefresh(); });
+        }, 50);
     }
 
     function editPolicy(id) {

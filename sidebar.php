@@ -113,11 +113,12 @@ if ($role === 'customer') {
     ]];
 } else {
     $sb_main = [
-        ['agents.php', 'agents', 'fa-id-card', 'My Profile'],
+        ['dashboard.php', 'dashboard', 'fa-chart-line', 'Agent Dashboard'],
         ['policy_entries.php', 'policies', 'fa-file-invoice', 'My Policies'],
         ['claims.php', 'claims', 'fa-car-burst', 'My Claims', 'claims', $sb_badges['claims']],
         ['vehicles.php', 'vehicles', 'fa-car', 'My Vehicles'],
         ['customers.php', 'customers', 'fa-users', 'My Customers'],
+        ['agents.php', 'agents', 'fa-id-card', 'My Profile'],
         ['agent_payout_charts.php', 'agent_payouts', 'fa-hand-holding-usd', 'My Payout Chart'],
         ['agent_transactions.php', 'agent_transactions', 'fa-receipt', 'My Account Statement'],
         ['notifications.php', 'notifications', 'fa-bell', 'Notifications', 'notif', $sb_badges['notif']],

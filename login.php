@@ -132,12 +132,14 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
     } else {
         $loginInput = isset($_POST['email']) ? trim($_POST['email']) : '';
         $password = isset($_POST['password']) ? $_POST['password'] : '';
+        $loginRole = isset($_POST['login_role']) ? trim($_POST['login_role']) : 'all';
 
         $isEmail = filter_var($loginInput, FILTER_VALIDATE_EMAIL);
         $isPhone = preg_match('/^[0-9+\s-]{10,15}$/', $loginInput);
+        $isCode = preg_match('/^[A-Za-z0-9_-]{3,30}$/', $loginInput);
 
-        if (!$isEmail && !$isPhone) {
-            $error = 'Enter a valid email address or 10-digit mobile number.';
+        if (!$isEmail && !$isPhone && !$isCode) {
+            $error = 'Enter a valid email address, mobile number or agent code.';
         } elseif (validatePassword($password) === false) {
             $error = 'Invalid password format.';
         } elseif (checkLoginAttempts($loginInput)) {
@@ -145,8 +147,16 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         } else {
             try {
                 $conn = getDBConnection();
-                $stmt = $conn->prepare("SELECT id, name, email, phone, password_hash, role, customer_id, is_active FROM users WHERE email = ? OR phone = ?");
-                $stmt->bind_param("ss", $loginInput, $loginInput);
+                $cleanPhone = preg_replace('/[^0-9]/', '', $loginInput);
+                $stmt = $conn->prepare("SELECT u.id, u.name, u.email, u.phone, u.password_hash, u.role, u.customer_id, u.is_active 
+                                        FROM users u 
+                                        LEFT JOIN agents a ON a.user_id = u.id 
+                                        WHERE u.email = ? 
+                                           OR u.phone = ? 
+                                           OR (u.phone IS NOT NULL AND u.phone != '' AND ? != '' AND REPLACE(REPLACE(u.phone, ' ', ''), '-', '') = ?)
+                                           OR a.agent_code = ? 
+                                        LIMIT 1");
+                $stmt->bind_param("sssss", $loginInput, $loginInput, $cleanPhone, $cleanPhone, $loginInput);
                 $stmt->execute();
                 $result = $stmt->get_result();
             } catch (Exception $e) {
@@ -166,6 +176,10 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
                 if (!$user['is_active']) {
                     $error = 'Account is deactivated. Contact administrator.';
+                } elseif ($loginRole === 'agent' && $user['role'] !== 'agent') {
+                    $error = 'This account is not registered as an Agent. Please choose Staff or Customer tab.';
+                } elseif ($loginRole === 'customer' && $user['role'] !== 'customer') {
+                    $error = 'This account is not registered as a Customer. Please choose Staff or Agent tab.';
                 } elseif (password_verify($password, $user['password_hash'])) {
                     clearLoginAttempts($loginInput);
                     recordLoginAttempt($loginInput, true); // success trail
@@ -197,7 +211,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     $upd->execute();
                     $upd->close();
 
-                    logActivity($user['id'], $user['name'], 'Login', 'User logged in successfully');
+                    logActivity($user['id'], $user['name'], 'Login', 'User logged in successfully (' . ucfirst($user['role']) . ')');
 
                     $stmt->close();
                     $conn->close();
@@ -205,12 +219,12 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                     header("Location: dashboard.php");
                     exit();
                 } else {
-                    recordLoginAttempt($email);
-                    $error = 'Invalid email or password';
+                    recordLoginAttempt($loginInput);
+                    $error = 'Invalid credentials or password';
                 }
             } elseif ($result && $result->num_rows == 0) {
-                recordLoginAttempt($email);
-                $error = 'Invalid email or password';
+                recordLoginAttempt($loginInput);
+                $error = 'Invalid credentials or password';
             }
 
             if (isset($stmt) && $stmt) $stmt->close();
@@ -236,6 +250,54 @@ $titles = ['login' => 'Login', 'forgot' => 'Forgot Password', 'reset' => 'Set a 
     <title><?php echo $titles[$mode]; ?> - <?php echo htmlspecialchars($branding['site_name']); ?></title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
     <link rel="stylesheet" href="styles.css?v=16.0">
+    <style>
+        .role-tabs {
+            display: flex;
+            background: #e2e8f0;
+            padding: 4px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            gap: 4px;
+        }
+        .role-tab {
+            flex: 1;
+            padding: 8px 6px;
+            border: none;
+            background: transparent;
+            border-radius: 8px;
+            font-size: 12.5px;
+            font-weight: 600;
+            color: #475569;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+        .role-tab:hover {
+            color: #0b2239;
+        }
+        .role-tab.active {
+            background: #ffffff;
+            color: #0b2239;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+        }
+        body.dark-mode .role-tabs {
+            background: #1e293b;
+        }
+        body.dark-mode .role-tab {
+            color: #94a3b8;
+        }
+        body.dark-mode .role-tab:hover {
+            color: #f1f5f9;
+        }
+        body.dark-mode .role-tab.active {
+            background: #0f172a;
+            color: #38bdf8;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+        }
+    </style>
 </head>
 <body>
     <div class="login-container">
@@ -291,10 +353,17 @@ $titles = ['login' => 'Login', 'forgot' => 'Forgot Password', 'reset' => 'Set a 
             <form method="POST" action="login.php">
                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
                 <input type="hidden" name="form" value="login">
+                <input type="hidden" name="login_role" id="loginRole" value="all">
+
+                <div class="role-tabs">
+                    <button type="button" class="role-tab active" data-role="all"><i class="fas fa-shield-halved"></i> Staff</button>
+                    <button type="button" class="role-tab" data-role="agent"><i class="fas fa-user-tie"></i> Agent</button>
+                    <button type="button" class="role-tab" data-role="customer"><i class="fas fa-user"></i> Customer</button>
+                </div>
 
                 <div class="form-group">
-                    <label for="email"><i class="fas fa-user"></i> Email or Mobile</label>
-                    <input type="text" id="email" name="email" placeholder="Email address or mobile" required autofocus autocomplete="username">
+                    <label for="email" id="loginLabel"><i class="fas fa-user"></i> Email or Mobile</label>
+                    <input type="text" id="email" name="email" placeholder="Email address, mobile or agent code" required autofocus autocomplete="username">
                 </div>
 
                 <div class="form-group">
@@ -357,6 +426,32 @@ $titles = ['login' => 'Login', 'forgot' => 'Forgot Password', 'reset' => 'Set a 
     }
 
     initTheme();
+
+    // Role Tab Switching
+    document.querySelectorAll('.role-tab').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.role-tab').forEach(function(b) { b.classList.remove('active'); });
+            this.classList.add('active');
+            var role = this.getAttribute('data-role');
+            var roleInput = document.getElementById('loginRole');
+            if (roleInput) roleInput.value = role;
+
+            var label = document.getElementById('loginLabel');
+            var input = document.getElementById('email');
+            if (!label || !input) return;
+
+            if (role === 'agent') {
+                label.innerHTML = '<i class="fas fa-id-badge"></i> Agent Code, Email or Mobile';
+                input.setAttribute('placeholder', 'Agent Code (e.g. AGT-001), Email or Mobile');
+            } else if (role === 'customer') {
+                label.innerHTML = '<i class="fas fa-user"></i> Mobile or Email';
+                input.setAttribute('placeholder', '10-digit mobile or registered email');
+            } else {
+                label.innerHTML = '<i class="fas fa-user"></i> Email or Mobile';
+                input.setAttribute('placeholder', 'Email address, mobile or agent code');
+            }
+        });
+    });
     </script>
 </body>
 </html>
