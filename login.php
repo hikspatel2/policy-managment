@@ -147,88 +147,112 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         } else {
             try {
                 $conn = getDBConnection();
-                $cleanPhone = preg_replace('/[^0-9]/', '', $loginInput);
-                $stmt = $conn->prepare("SELECT u.id, u.name, u.email, u.phone, u.password_hash, u.role, u.customer_id, u.is_active 
-                                        FROM users u 
-                                        LEFT JOIN agents a ON a.user_id = u.id 
-                                        WHERE u.email = ? 
-                                           OR u.phone = ? 
-                                           OR (u.phone IS NOT NULL AND u.phone != '' AND ? != '' AND REPLACE(REPLACE(u.phone, ' ', ''), '-', '') = ?)
-                                           OR a.agent_code = ? 
-                                        LIMIT 1");
-                $stmt->bind_param("sssss", $loginInput, $loginInput, $cleanPhone, $cleanPhone, $loginInput);
-                $stmt->execute();
-                $result = $stmt->get_result();
-            } catch (Exception $e) {
-                if (strpos($e->getMessage(), "doesn't exist") !== false || strpos($e->getMessage(), "Unknown column") !== false) {
-                    $error = 'Database not set up. Please run <a href="setup.php" class="login-link">setup.php</a> first.';
-                } else {
-                    $error = 'Database error. Please contact administrator.';
-                    error_log("Login error: " . $e->getMessage());
-                }
-                if (isset($stmt)) $stmt->close();
-                if (isset($conn)) $conn->close();
-                $result = null;
-            }
+                $user = null;
 
-            if ($result && $result->num_rows == 1) {
-                $user = $result->fetch_assoc();
-
-                if (!$user['is_active']) {
-                    $error = 'Account is deactivated. Contact administrator.';
-                } elseif ($loginRole === 'agent' && $user['role'] !== 'agent') {
-                    $error = 'This account is not registered as an Agent. Please choose Staff or Customer tab.';
-                } elseif ($loginRole === 'customer' && $user['role'] !== 'customer') {
-                    $error = 'This account is not registered as a Customer. Please choose Staff or Agent tab.';
-                } elseif (password_verify($password, $user['password_hash'])) {
-                    clearLoginAttempts($loginInput);
-                    recordLoginAttempt($loginInput, true); // success trail
-                    session_regenerate_id(true);
-
-                    $_SESSION['user_id'] = $user['id'];
-                    $_SESSION['username'] = $user['name']; // compat key
-                    $_SESSION['email'] = $user['email'];
-                    $_SESSION['role'] = $user['role'];
-                    $_SESSION['customer_id'] = !empty($user['customer_id']) ? (int)$user['customer_id'] : null;
-                    $_SESSION['LAST_ACTIVITY'] = time();
-
-                    if ($user['role'] === 'customer' && empty($_SESSION['customer_id'])) {
-                        $cSt = $conn->prepare("SELECT id FROM customers WHERE email = ? OR mobile = ? LIMIT 1");
-                        $cSt->bind_param("ss", $user['email'], $user['phone']);
-                        $cSt->execute();
-                        $cRow = $cSt->get_result()->fetch_assoc();
-                        $cSt->close();
-                        if ($cRow) {
-                            $_SESSION['customer_id'] = (int)$cRow['id'];
-                            $conn->query("UPDATE users SET customer_id = " . (int)$cRow['id'] . " WHERE id = " . (int)$user['id']);
-                        }
+                // 1. Direct match on users table by email or phone (using guaranteed core columns)
+                $stmt = $conn->prepare("SELECT id, name, email, phone, password_hash, role, is_active FROM users WHERE email = ? OR (phone IS NOT NULL AND phone != '' AND phone = ?) LIMIT 1");
+                if ($stmt) {
+                    $stmt->bind_param("ss", $loginInput, $loginInput);
+                    $stmt->execute();
+                    $res = $stmt->get_result();
+                    if ($res && $res->num_rows === 1) {
+                        $user = $res->fetch_assoc();
                     }
-
-                    // update last login
-                    $ip = $_SERVER['REMOTE_ADDR'] ?? '';
-                    $upd = $conn->prepare("UPDATE users SET last_login_at = NOW(), last_login_ip = ? WHERE id = ?");
-                    $upd->bind_param("si", $ip, $user['id']);
-                    $upd->execute();
-                    $upd->close();
-
-                    logActivity($user['id'], $user['name'], 'Login', 'User logged in successfully (' . ucfirst($user['role']) . ')');
-
                     $stmt->close();
-                    $conn->close();
+                }
 
-                    header("Location: dashboard.php");
-                    exit();
+                // 2. If not found by email/phone, check if loginInput matches an agent code or mobile in agents table
+                if (!$user) {
+                    $stmt = $conn->prepare("SELECT u.id, u.name, u.email, u.phone, u.password_hash, u.role, u.is_active 
+                                            FROM agents a 
+                                            JOIN users u ON u.id = a.user_id 
+                                            WHERE a.agent_code = ? OR a.mobile = ? 
+                                            LIMIT 1");
+                    if ($stmt) {
+                        $stmt->bind_param("ss", $loginInput, $loginInput);
+                        $stmt->execute();
+                        $res = $stmt->get_result();
+                        if ($res && $res->num_rows === 1) {
+                            $user = $res->fetch_assoc();
+                        }
+                        $stmt->close();
+                    }
+                }
+
+                // 3. Fallback: match clean digits against user phone
+                $cleanDigits = preg_replace('/[^0-9]/', '', $loginInput);
+                if (!$user && strlen($cleanDigits) >= 10) {
+                    $stmt = $conn->prepare("SELECT id, name, email, phone, password_hash, role, is_active FROM users WHERE REPLACE(REPLACE(phone, ' ', ''), '-', '') LIKE CONCAT('%', ?) LIMIT 1");
+                    if ($stmt) {
+                        $stmt->bind_param("s", $cleanDigits);
+                        $stmt->execute();
+                        $res = $stmt->get_result();
+                        if ($res && $res->num_rows === 1) {
+                            $user = $res->fetch_assoc();
+                        }
+                        $stmt->close();
+                    }
+                }
+
+                if ($user) {
+                    if (!$user['is_active']) {
+                        $error = 'Account is deactivated. Contact administrator.';
+                    } elseif (password_verify($password, $user['password_hash'])) {
+                        clearLoginAttempts($loginInput);
+                        recordLoginAttempt($loginInput, true); // success trail
+                        session_regenerate_id(true);
+
+                        $_SESSION['user_id'] = $user['id'];
+                        $_SESSION['username'] = $user['name']; // compat key
+                        $_SESSION['email'] = $user['email'];
+                        $_SESSION['role'] = $user['role'];
+                        $_SESSION['customer_id'] = null;
+                        $_SESSION['LAST_ACTIVITY'] = time();
+
+                        if ($user['role'] === 'customer') {
+                            $cSt = $conn->prepare("SELECT id FROM customers WHERE email = ? OR (mobile IS NOT NULL AND mobile != '' AND mobile = ?) LIMIT 1");
+                            if ($cSt) {
+                                $cSt->bind_param("ss", $user['email'], $user['phone']);
+                                $cSt->execute();
+                                $cRes = $cSt->get_result();
+                                if ($cRes && $cRow = $cRes->fetch_assoc()) {
+                                    $_SESSION['customer_id'] = (int)$cRow['id'];
+                                }
+                                $cSt->close();
+                            }
+                        }
+
+                        // update last login safely (support tables with or without last_login_ip)
+                        $ip = $_SERVER['REMOTE_ADDR'] ?? '';
+                        $upd = $conn->prepare("UPDATE users SET last_login_at = NOW(), last_login_ip = ? WHERE id = ?");
+                        if ($upd) {
+                            $upd->bind_param("si", $ip, $user['id']);
+                            $upd->execute();
+                            $upd->close();
+                        } else {
+                            @$conn->query("UPDATE users SET last_login_at = NOW() WHERE id = " . (int)$user['id']);
+                        }
+
+                        logActivity($user['id'], $user['name'], 'Login', 'User logged in successfully (' . ucfirst($user['role']) . ')');
+
+                        $conn->close();
+
+                        header("Location: dashboard.php");
+                        exit();
+                    } else {
+                        recordLoginAttempt($loginInput);
+                        $error = 'Invalid email, mobile or password.';
+                    }
                 } else {
                     recordLoginAttempt($loginInput);
-                    $error = 'Invalid credentials or password';
+                    $error = 'Invalid email, mobile or password.';
                 }
-            } elseif ($result && $result->num_rows == 0) {
-                recordLoginAttempt($loginInput);
-                $error = 'Invalid credentials or password';
-            }
 
-            if (isset($stmt) && $stmt) $stmt->close();
-            if (isset($conn) && $conn) $conn->close();
+                $conn->close();
+            } catch (Throwable $e) {
+                error_log("Login error: " . $e->getMessage());
+                $error = 'Login error. Please try again or contact administrator.';
+            }
         }
     }
 }
