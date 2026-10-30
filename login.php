@@ -150,7 +150,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 $user = null;
 
                 // 1. Direct match on users table by email or phone (using guaranteed core columns)
-                $stmt = $conn->prepare("SELECT id, name, email, phone, password_hash, role, is_active FROM users WHERE email = ? OR (phone IS NOT NULL AND phone != '' AND phone = ?) LIMIT 1");
+                $stmt = $conn->prepare("SELECT id, name, email, phone, password_hash, role, is_active, status, profile_setup_completed FROM users WHERE email = ? OR (phone IS NOT NULL AND phone != '' AND phone = ?) LIMIT 1");
                 if ($stmt) {
                     $stmt->bind_param("ss", $loginInput, $loginInput);
                     $stmt->execute();
@@ -163,7 +163,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
                 // 2. If not found by email/phone, check if loginInput matches an agent code or mobile in agents table
                 if (!$user) {
-                    $stmt = $conn->prepare("SELECT u.id, u.name, u.email, u.phone, u.password_hash, u.role, u.is_active 
+                    $stmt = $conn->prepare("SELECT u.id, u.name, u.email, u.phone, u.password_hash, u.role, u.is_active, u.status, u.profile_setup_completed 
                                             FROM agents a 
                                             JOIN users u ON u.id = a.user_id 
                                             WHERE a.agent_code = ? OR a.mobile = ? 
@@ -182,7 +182,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 // 3. Fallback: match clean digits against user phone
                 $cleanDigits = preg_replace('/[^0-9]/', '', $loginInput);
                 if (!$user && strlen($cleanDigits) >= 10) {
-                    $stmt = $conn->prepare("SELECT id, name, email, phone, password_hash, role, is_active FROM users WHERE REPLACE(REPLACE(phone, ' ', ''), '-', '') LIKE CONCAT('%', ?) LIMIT 1");
+                    $stmt = $conn->prepare("SELECT id, name, email, phone, password_hash, role, is_active, status, profile_setup_completed FROM users WHERE REPLACE(REPLACE(phone, ' ', ''), '-', '') LIKE CONCAT('%', ?) LIMIT 1");
                     if ($stmt) {
                         $stmt->bind_param("s", $cleanDigits);
                         $stmt->execute();
@@ -195,8 +195,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                 }
 
                 if ($user) {
-                    if (!$user['is_active']) {
-                        $error = 'Account is deactivated. Contact administrator.';
+                    $uStatus = $user['status'] ?? ($user['is_active'] ? 'active' : 'suspended');
+                    if (!$user['is_active'] || $uStatus === 'blocked') {
+                        $error = 'Your account has been blocked or deactivated. Contact administrator.';
+                    } elseif ($uStatus === 'suspended') {
+                        $error = 'Your account is currently suspended. Please contact support.';
                     } elseif (password_verify($password, $user['password_hash'])) {
                         clearLoginAttempts($loginInput);
                         recordLoginAttempt($loginInput, true); // success trail
@@ -206,8 +209,11 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         $_SESSION['username'] = $user['name']; // compat key
                         $_SESSION['email'] = $user['email'];
                         $_SESSION['role'] = $user['role'];
+                        $_SESSION['status'] = $uStatus;
                         $_SESSION['customer_id'] = null;
                         $_SESSION['LAST_ACTIVITY'] = time();
+
+                        $targetUrl = 'dashboard.php';
 
                         if ($user['role'] === 'customer') {
                             $cSt = $conn->prepare("SELECT id FROM customers WHERE email = ? OR (mobile IS NOT NULL AND mobile != '' AND mobile = ?) LIMIT 1");
@@ -219,6 +225,21 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                                     $_SESSION['customer_id'] = (int)$cRow['id'];
                                 }
                                 $cSt->close();
+                            }
+                        } elseif ($user['role'] === 'agent') {
+                            $aid = agentIdForUser($conn, $user['id']);
+                            if ($uStatus === 'pending_verification') {
+                                $targetUrl = 'agent_verify.php';
+                            } elseif ($uStatus === 'verification_completed' || $uStatus === 'pending_subscription') {
+                                $targetUrl = 'agent_plans.php';
+                            } else {
+                                // Check active subscription
+                                $sub = $aid ? getAgentSubscription($conn, $aid) : null;
+                                if (!$sub || !$sub['is_valid']) {
+                                    $targetUrl = 'agent_plans.php';
+                                } elseif (empty($user['profile_setup_completed'])) {
+                                    $targetUrl = 'agent_setup.php';
+                                }
                             }
                         }
 
@@ -237,7 +258,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
 
                         $conn->close();
 
-                        header("Location: dashboard.php");
+                        header("Location: " . $targetUrl);
                         exit();
                     } else {
                         recordLoginAttempt($loginInput);
@@ -402,6 +423,11 @@ $titles = ['login' => 'Login', 'forgot' => 'Forgot Password', 'reset' => 'Set a 
                 <button type="submit" class="btn btn-primary btn-block">
                     <i class="fas fa-sign-in-alt"></i> <span id="loginBtnText">Login as Admin</span>
                 </button>
+
+                <div style="margin-top: 15px; text-align: center; font-size: 13.5px;" id="agentRegisterLink">
+                    <span style="color: #64748b;">New Insurance Agent?</span>
+                    <a href="agent_register.php" style="color: var(--primary-color, #001f3f); font-weight: 600; text-decoration: none; margin-left: 5px;">Register Account <i class="fas fa-arrow-right" style="font-size: 11px;"></i></a>
+                </div>
             </form>
             <?php endif; ?>
 

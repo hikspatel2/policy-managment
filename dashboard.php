@@ -294,12 +294,14 @@ if (isset($_GET['action']) && $_GET['action'] === 'getAgentStats') {
     $rangeCount = (int) dxRows($conn, "SELECT COUNT(*) AS c FROM policy_entries WHERE agent_id = ? AND status != 'cancelled' AND entry_date BETWEEN ? AND ?", 'iss', $agentId, $rFrom, $rTo)[0]['c'];
     $focus = dashboardFocus($conn, $agentId);
     $feed = dxRows($conn, "SELECT type, title, message, created_at FROM notifications WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT 7", 'i', $user_id);
+    $sub = getAgentSubscription($conn, $agentId);
 
     $conn->close();
 
     echo json_encode([
         'success' => true,
         'data' => [
+            'subscription' => $sub,
             'rangePolicyCount' => $rangeCount,
             'prev' => $prev,
             'focus' => $focus,
@@ -1264,6 +1266,45 @@ $branding = getBranding();
                 <!-- Real content -->
                 <div id="agentContent" style="display:none">
 
+                    <!-- Agent Subscription & Plan Usage Banner -->
+                    <div id="agSubscriptionBanner" class="dx-card" style="margin-bottom: 20px; padding: 18px 22px; border-radius: 12px; background: white; border: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px;">
+                        <div>
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <span class="badge" id="agSubPlanBadge" style="background: #001f3f; color: white; padding: 4px 12px; border-radius: 20px; font-weight: 700; font-size: 13px;">Plan Loading...</span>
+                                <span id="agSubDaysLeft" style="font-size: 13.5px; color: #166534; font-weight: 600;"><i class="fas fa-clock"></i> Active</span>
+                            </div>
+                            <div style="display: flex; gap: 24px; margin-top: 12px; flex-wrap: wrap;">
+                                <div>
+                                    <small style="color: #64748b; font-size: 12px; display: block;">Customers Quota</small>
+                                    <strong id="agCustUsage" style="font-size: 15px; color: #0f172a;">- / -</strong>
+                                </div>
+                                <div>
+                                    <small style="color: #64748b; font-size: 12px; display: block;">Policies Quota</small>
+                                    <strong id="agPolUsage" style="font-size: 15px; color: #0f172a;">- / -</strong>
+                                </div>
+                                <div>
+                                    <small style="color: #64748b; font-size: 12px; display: block;">Monthly AI Scans</small>
+                                    <strong id="agAiUsage" style="font-size: 15px; color: #0284c7;">- / -</strong>
+                                </div>
+                                <div>
+                                    <small style="color: #64748b; font-size: 12px; display: block;">WhatsApp Reminders</small>
+                                    <strong id="agWaUsage" style="font-size: 15px; color: #10b981;">- / -</strong>
+                                </div>
+                            </div>
+                        </div>
+                        <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            <a href="policy_upload.php" class="btn btn-primary" style="padding: 9px 16px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;">
+                                <i class="fas fa-file-arrow-up"></i> Upload & Scan Policy
+                            </a>
+                            <a href="customer_followups.php" class="btn btn-secondary" style="padding: 9px 14px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;">
+                                <i class="fas fa-headset"></i> Follow-ups
+                            </a>
+                            <a href="agent_plans.php" class="btn btn-secondary" style="padding: 9px 14px; border-radius: 8px; text-decoration: none; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;">
+                                <i class="fas fa-crown"></i> Plan
+                            </a>
+                        </div>
+                    </div>
+
                     <?php echo $dxHtml; ?>
 
                     <!-- Row 3: Charts -->
@@ -1873,6 +1914,16 @@ $branding = getBranding();
                             var t = NOTIF_TONE[n.type] || NOTIF_TONE.general;
                             return { tone: t[0], icon: t[1], title: n.title, sub: n.message, at: n.created_at };
                         }), 'No notifications yet', true);
+
+                        if (d.subscription) {
+                            var sub = d.subscription;
+                            $('#agSubPlanBadge').text(sub.plan_name + ' (' + (sub.billing_cycle || 'monthly') + ')');
+                            $('#agSubDaysLeft').html('<i class="fas fa-clock"></i> ' + (sub.days_left || 0) + ' days remaining');
+                            $('#agCustUsage').text((sub.actual_customer_count || 0) + ' / ' + (sub.max_customers > 99999 ? 'Unlimited' : sub.max_customers));
+                            $('#agPolUsage').text((sub.actual_policy_count || 0) + ' / ' + (sub.max_policies > 99999 ? 'Unlimited' : sub.max_policies));
+                            $('#agAiUsage').text((sub.ai_scan_count || 0) + ' / ' + sub.monthly_ai_scans);
+                            $('#agWaUsage').text((sub.whatsapp_count || 0) + ' / ' + sub.whatsapp_limit);
+                        }
 
                         // monthly commission line chart
                         renderAgentCommissionChart(d.monthlyCommission);

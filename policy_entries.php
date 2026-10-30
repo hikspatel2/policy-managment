@@ -595,6 +595,15 @@ if (isset($_GET['action'])) {
                     exit();
                 }
 
+                if ($role === 'agent') {
+                    $chkAid = agentIdForUser($conn, $user_id);
+                    $pLimit = checkAgentSubscriptionLimit($conn, $chkAid, 'policy');
+                    if (!$pLimit['allowed']) {
+                        echo json_encode(['success' => false, 'message' => $pLimit['message']]);
+                        exit();
+                    }
+                }
+
                 // required fields
                 $insCat = trim($_POST['insurance_category'] ?? 'motor');
                 if (!in_array($insCat, ['motor', 'health', 'life'], true)) $insCat = 'motor';
@@ -838,6 +847,23 @@ if (isset($_GET['action'])) {
                     $insertId = $stmt->insert_id;
                     $stmt->close();
                     savePolicyExtras($conn, $insertId, $extras, null);
+
+                    // Automatic 5-Stage Expiry Reminders Scheduling
+                    schedulePolicyReminders($conn, $insertId, $agentId, $customerId, $policyEnd);
+
+                    // Continuous Policy Renewal Chain
+                    $prevPolicyId = !empty($_POST['previous_policy_id']) ? (int)$_POST['previous_policy_id'] : 0;
+                    if ($prevPolicyId > 0) {
+                        $conn->query("UPDATE policy_entries SET previous_policy_id = {$prevPolicyId}, renewal_status = 'renewed' WHERE id = {$insertId}");
+                        $conn->query("UPDATE policy_entries SET renewal_status = 'renewed' WHERE id = {$prevPolicyId}");
+                        $conn->query("UPDATE reminder_schedules SET status = 'cancelled' WHERE policy_entry_id = {$prevPolicyId} AND status = 'pending'");
+                        $conn->query("UPDATE customer_followups SET followup_stage = 'renewed', is_completed = 1 WHERE policy_entry_id = {$prevPolicyId}");
+                    }
+
+                    // Increment Agent Subscription Usage
+                    if ($agentId > 0) {
+                        $conn->query("UPDATE subscriptions SET policy_count = policy_count + 1 WHERE agent_id = {$agentId} AND status = 'active' ORDER BY id DESC LIMIT 1");
+                    }
 
                     $zero = 0.00;
 

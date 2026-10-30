@@ -46,6 +46,10 @@ CREATE TABLE `users` (
   `customer_id` BIGINT NULL,
   `is_active` BOOLEAN DEFAULT TRUE,
   `profile_image` VARCHAR(255) NULL,
+  `status` ENUM('pending_verification','verification_completed','pending_subscription','active','suspended','blocked') NOT NULL DEFAULT 'active',
+  `profile_setup_completed` TINYINT(1) NOT NULL DEFAULT 0,
+  `mobile_verified_at` DATETIME NULL,
+  `email_verified_at` DATETIME NULL,
   `theme_primary` VARCHAR(20) DEFAULT '#001f3f',
   `theme_secondary` VARCHAR(20) DEFAULT '#003366',
   `theme_accent` VARCHAR(20) DEFAULT '#0074D9',
@@ -63,6 +67,7 @@ CREATE TABLE `users` (
   INDEX `idx_role` (`role`),
   INDEX `idx_branch_id` (`branch_id`),
   INDEX `idx_customer_id` (`customer_id`),
+  INDEX `idx_user_status` (`status`),
   INDEX `idx_is_active` (`is_active`),
   FOREIGN KEY (`branch_id`) REFERENCES `branches`(`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
@@ -77,9 +82,12 @@ CREATE TABLE `agents` (
   `branch_id` BIGINT NULL,
   `agent_code` VARCHAR(30) NOT NULL UNIQUE,
   `name` VARCHAR(150) NOT NULL,
+  `agency_name` VARCHAR(200) NULL,
   `mobile` VARCHAR(15) NOT NULL,
   `email` VARCHAR(200) NULL,
   `address` TEXT NULL,
+  `city` VARCHAR(100) NULL,
+  `pincode` VARCHAR(10) NULL,
   `state` VARCHAR(100) NULL,
   `pan_number` VARCHAR(10) NULL,
   `aadhar_number` VARCHAR(12) NULL,
@@ -90,6 +98,13 @@ CREATE TABLE `agents` (
   `bank_name` VARCHAR(100) NULL,
   `bank_account_no` VARCHAR(20) NULL,
   `ifsc_code` VARCHAR(11) NULL,
+  `referral_code` VARCHAR(50) NULL,
+  `referred_by_agent_id` BIGINT NULL,
+  `logo_path` VARCHAR(255) NULL,
+  `whatsapp_consent` TINYINT(1) NOT NULL DEFAULT 1,
+  `email_consent` TINYINT(1) NOT NULL DEFAULT 1,
+  `terms_accepted_at` DATETIME NULL,
+  `active_subscription_id` BIGINT NULL,
   `upi_id` VARCHAR(60) NULL,
   `wallet_balance` DECIMAL(14,2) DEFAULT 0.00,
   `outstanding_balance` DECIMAL(14,2) DEFAULT 0.00,
@@ -101,7 +116,9 @@ CREATE TABLE `agents` (
   INDEX `idx_user_id` (`user_id`),
   INDEX `idx_branch_id` (`branch_id`),
   INDEX `idx_agent_code` (`agent_code`),
-  INDEX `idx_license_expiry` (`license_expiry_date`)
+  INDEX `idx_license_expiry` (`license_expiry_date`),
+  INDEX `idx_ag_active_sub` (`active_subscription_id`),
+  INDEX `idx_ag_ref_code` (`referral_code`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------
@@ -137,13 +154,21 @@ CREATE TABLE `customers` (
   `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
   `name` VARCHAR(150) NOT NULL,
   `mobile` VARCHAR(15) NOT NULL,
+  `secondary_mobile` VARCHAR(15) NULL,
   `whatsapp_number` VARCHAR(15) NULL,
   `date_of_birth` DATE NULL,
+  `dob` DATE NULL,
+  `gender` ENUM('male','female','other') NULL,
   `email` VARCHAR(200) NULL,
   `address` TEXT NULL,
   `city` VARCHAR(100) NULL,
   `pincode` VARCHAR(10) NULL,
   `state` VARCHAR(100) NULL,
+  `primary_wa_consent` TINYINT(1) NOT NULL DEFAULT 1,
+  `secondary_wa_consent` TINYINT(1) NOT NULL DEFAULT 0,
+  `email_consent` TINYINT(1) NOT NULL DEFAULT 1,
+  `consent_timestamp` DATETIME NULL,
+  `consent_source` VARCHAR(50) DEFAULT 'agent_portal',
   `ckyc_number` VARCHAR(20) NULL,
   `referral_code` VARCHAR(20) NULL UNIQUE,
   `referred_by` BIGINT NULL,
@@ -298,6 +323,11 @@ CREATE TABLE `policy_entries` (
   `cancelled_at` DATETIME NULL,
   `cancellation_reason` VARCHAR(255) NULL,
   `remarks` TEXT NULL,
+  `renewal_status` ENUM('original','renewed','pending_renewal') NOT NULL DEFAULT 'original',
+  `document_reference` VARCHAR(100) NULL,
+  `verification_status` ENUM('pending_verification','verified','rejected') NOT NULL DEFAULT 'verified',
+  `verified_by` BIGINT NULL,
+  `verified_at` DATETIME NULL,
   `last_reminder_at` DATETIME NULL,
   `reminder_count` SMALLINT NOT NULL DEFAULT 0,
   `created_by` BIGINT NOT NULL,
@@ -323,6 +353,8 @@ CREATE TABLE `policy_entries` (
   INDEX `idx_status` (`status`),
   INDEX `idx_policy_dates` (`policy_start_date`, `policy_end_date`),
   INDEX `idx_prev_policy` (`previous_policy_id`),
+  INDEX `idx_renewal_status` (`renewal_status`),
+  INDEX `idx_verif_status` (`verification_status`),
   INDEX `idx_pe_pay_in_bank` (`payment_in_bank_account_id`),
   INDEX `idx_pe_pay_out_bank` (`payment_out_bank_account_id`),
   INDEX `idx_deleted_at` (`deleted_at`)
@@ -1079,6 +1111,257 @@ INSERT INTO `todos` (`id`, `title`, `description`, `priority`, `status`, `due_da
 (1, 'Call customers with lapsed policies', 'Follow up on policies that expired this month', 'high', 'pending', DATE_ADD(CURDATE(), INTERVAL 1 DAY), 2, 1),
 (2, 'Send renewal quotes for next week', 'Quotes for policies expiring in the next 7 days', 'urgent', 'in_progress', CURDATE(), 2, 1),
 (3, 'Reconcile Bank A statement', 'Match premium receipts with bank entries', 'medium', 'pending', DATE_ADD(CURDATE(), INTERVAL 3 DAY), 1, 1);
+
+-- ------------------------------------------------------------
+-- Table: subscription_plans
+-- ------------------------------------------------------------
+DROP TABLE IF EXISTS `subscription_plans`;
+CREATE TABLE `subscription_plans` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `name` VARCHAR(100) NOT NULL,
+  `slug` VARCHAR(100) NOT NULL UNIQUE,
+  `description` TEXT NULL,
+  `monthly_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `quarterly_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `yearly_price` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `validity_days` INT NOT NULL DEFAULT 30,
+  `max_customers` INT NOT NULL DEFAULT 100,
+  `max_policies` INT NOT NULL DEFAULT 200,
+  `monthly_ai_scans` INT NOT NULL DEFAULT 50,
+  `team_members_limit` INT NOT NULL DEFAULT 1,
+  `whatsapp_limit` INT NOT NULL DEFAULT 500,
+  `reports_access` BOOLEAN NOT NULL DEFAULT TRUE,
+  `advanced_features` BOOLEAN NOT NULL DEFAULT FALSE,
+  `is_trial` BOOLEAN NOT NULL DEFAULT FALSE,
+  `trial_days` INT NOT NULL DEFAULT 0,
+  `is_active` BOOLEAN NOT NULL DEFAULT TRUE,
+  `display_order` INT NOT NULL DEFAULT 0,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX `idx_plan_slug` (`slug`),
+  INDEX `idx_plan_active` (`is_active`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT INTO `subscription_plans` (`id`, `name`, `slug`, `description`, `monthly_price`, `quarterly_price`, `yearly_price`, `validity_days`, `max_customers`, `max_policies`, `monthly_ai_scans`, `team_members_limit`, `whatsapp_limit`, `reports_access`, `advanced_features`, `is_trial`, `trial_days`, `display_order`) VALUES
+(1, 'Starter Agent', 'starter-agent', 'Ideal for independent agents starting their insurance portfolio.', 499.00, 1299.00, 4499.00, 30, 100, 200, 30, 1, 300, 1, 0, 0, 0, 1),
+(2, 'Professional Agent', 'professional-agent', 'Most popular plan for growing insurance agents with automated reminders and AI scanner.', 999.00, 2699.00, 8999.00, 30, 500, 1000, 150, 3, 1500, 1, 1, 0, 0, 2),
+(3, 'Agency Enterprise', 'agency-enterprise', 'Unlimited capacity for established agencies and top insurance performers.', 1999.00, 5499.00, 17999.00, 30, 999999, 999999, 500, 10, 5000, 1, 1, 0, 0, 3),
+(4, '14-Day Free Trial', 'free-trial', 'Experience the full power of AI policy scanning and WhatsApp automated reminders risk-free.', 0.00, 0.00, 0.00, 14, 25, 50, 15, 1, 100, 1, 1, 1, 14, 0);
+
+-- ------------------------------------------------------------
+-- Table: subscriptions
+-- ------------------------------------------------------------
+DROP TABLE IF EXISTS `subscriptions`;
+CREATE TABLE `subscriptions` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `agent_id` BIGINT NOT NULL,
+  `plan_id` BIGINT NOT NULL,
+  `billing_cycle` ENUM('monthly','quarterly','yearly','trial') NOT NULL DEFAULT 'monthly',
+  `start_date` DATE NOT NULL,
+  `expiry_date` DATE NOT NULL,
+  `status` ENUM('pending','active','expired','cancelled','suspended','payment_failed') NOT NULL DEFAULT 'pending',
+  `customer_count` INT NOT NULL DEFAULT 0,
+  `policy_count` INT NOT NULL DEFAULT 0,
+  `ai_scan_count` INT NOT NULL DEFAULT 0,
+  `whatsapp_count` INT NOT NULL DEFAULT 0,
+  `auto_renew` BOOLEAN NOT NULL DEFAULT TRUE,
+  `cancelled_at` DATETIME NULL,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (`agent_id`) REFERENCES `agents`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`plan_id`) REFERENCES `subscription_plans`(`id`),
+  INDEX `idx_sub_agent` (`agent_id`),
+  INDEX `idx_sub_status` (`status`),
+  INDEX `idx_sub_expiry` (`expiry_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
+-- Table: subscription_payments
+-- ------------------------------------------------------------
+DROP TABLE IF EXISTS `subscription_payments`;
+CREATE TABLE `subscription_payments` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `subscription_id` BIGINT NULL,
+  `agent_id` BIGINT NOT NULL,
+  `plan_id` BIGINT NOT NULL,
+  `order_id` VARCHAR(100) NULL,
+  `payment_id` VARCHAR(100) NULL,
+  `payment_signature` VARCHAR(255) NULL,
+  `amount` DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+  `currency` VARCHAR(10) NOT NULL DEFAULT 'INR',
+  `billing_cycle` ENUM('monthly','quarterly','yearly','trial') NOT NULL DEFAULT 'monthly',
+  `payment_method` VARCHAR(50) NOT NULL DEFAULT 'razorpay',
+  `status` ENUM('pending','completed','failed','refunded') NOT NULL DEFAULT 'pending',
+  `invoice_number` VARCHAR(50) NULL UNIQUE,
+  `receipt_url` VARCHAR(255) NULL,
+  `webhook_payload` LONGTEXT NULL,
+  `paid_at` DATETIME NULL,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`agent_id`) REFERENCES `agents`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`plan_id`) REFERENCES `subscription_plans`(`id`),
+  INDEX `idx_pay_order` (`order_id`),
+  INDEX `idx_pay_payment` (`payment_id`),
+  INDEX `idx_pay_agent` (`agent_id`),
+  INDEX `idx_pay_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
+-- Table: policy_extractions
+-- ------------------------------------------------------------
+DROP TABLE IF EXISTS `policy_extractions`;
+CREATE TABLE `policy_extractions` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `document_id` BIGINT NULL,
+  `policy_entry_id` BIGINT NULL,
+  `agent_id` BIGINT NOT NULL,
+  `customer_id` BIGINT NULL,
+  `file_path` VARCHAR(255) NOT NULL,
+  `raw_text` LONGTEXT NULL,
+  `extracted_data` LONGTEXT NULL,
+  `confidence_scores` TEXT NULL,
+  `ai_provider` VARCHAR(50) NOT NULL DEFAULT 'gemini',
+  `scanning_status` ENUM('uploaded','processing','completed','failed','manual_review') NOT NULL DEFAULT 'uploaded',
+  `error_message` TEXT NULL,
+  `processing_time_ms` INT NULL,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (`agent_id`) REFERENCES `agents`(`id`) ON DELETE CASCADE,
+  INDEX `idx_pe_agent` (`agent_id`),
+  INDEX `idx_pe_status` (`scanning_status`),
+  INDEX `idx_pe_policy` (`policy_entry_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
+-- Table: reminder_schedules
+-- ------------------------------------------------------------
+DROP TABLE IF EXISTS `reminder_schedules`;
+CREATE TABLE `reminder_schedules` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `policy_entry_id` BIGINT NOT NULL,
+  `agent_id` BIGINT NOT NULL,
+  `customer_id` BIGINT NOT NULL,
+  `reminder_stage` ENUM('30_days','14_days','7_days','2_days','expiry_day','post_expiry') NOT NULL,
+  `scheduled_date` DATE NOT NULL,
+  `scheduled_channel` ENUM('whatsapp','email','both') NOT NULL DEFAULT 'both',
+  `status` ENUM('pending','sent','failed','cancelled','skipped') NOT NULL DEFAULT 'pending',
+  `sent_at` DATETIME NULL,
+  `failure_reason` TEXT NULL,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (`policy_entry_id`) REFERENCES `policy_entries`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`agent_id`) REFERENCES `agents`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`customer_id`) REFERENCES `customers`(`id`) ON DELETE CASCADE,
+  INDEX `idx_rs_status_date` (`status`, `scheduled_date`),
+  INDEX `idx_rs_policy` (`policy_entry_id`),
+  INDEX `idx_rs_agent` (`agent_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
+-- Table: notification_logs
+-- ------------------------------------------------------------
+DROP TABLE IF EXISTS `notification_logs`;
+CREATE TABLE `notification_logs` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `reminder_schedule_id` BIGINT NULL,
+  `policy_entry_id` BIGINT NULL,
+  `agent_id` BIGINT NOT NULL,
+  `customer_id` BIGINT NOT NULL,
+  `channel` ENUM('whatsapp','email','sms') NOT NULL DEFAULT 'whatsapp',
+  `recipient_contact` VARCHAR(200) NOT NULL,
+  `message_content` TEXT NOT NULL,
+  `template_id` VARCHAR(100) NULL,
+  `status` ENUM('queued','sent','delivered','read','failed') NOT NULL DEFAULT 'sent',
+  `provider_message_id` VARCHAR(150) NULL,
+  `provider_response` TEXT NULL,
+  `error_message` TEXT NULL,
+  `sent_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`agent_id`) REFERENCES `agents`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`customer_id`) REFERENCES `customers`(`id`) ON DELETE CASCADE,
+  INDEX `idx_nl_agent` (`agent_id`),
+  INDEX `idx_nl_status` (`status`),
+  INDEX `idx_nl_sent` (`sent_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
+-- Table: customer_followups
+-- ------------------------------------------------------------
+DROP TABLE IF EXISTS `customer_followups`;
+CREATE TABLE `customer_followups` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `policy_entry_id` BIGINT NULL,
+  `customer_id` BIGINT NOT NULL,
+  `agent_id` BIGINT NOT NULL,
+  `followup_stage` ENUM('new_renewal','contacted','interested','quote_sent','negotiation','renewed','lost') NOT NULL DEFAULT 'new_renewal',
+  `call_notes` TEXT NULL,
+  `next_followup_date` DATE NULL,
+  `assigned_agent_id` BIGINT NULL,
+  `is_completed` BOOLEAN NOT NULL DEFAULT FALSE,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (`customer_id`) REFERENCES `customers`(`id`) ON DELETE CASCADE,
+  FOREIGN KEY (`agent_id`) REFERENCES `agents`(`id`) ON DELETE CASCADE,
+  INDEX `idx_cf_agent` (`agent_id`),
+  INDEX `idx_cf_stage` (`followup_stage`),
+  INDEX `idx_cf_next` (`next_followup_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
+-- Table: support_tickets
+-- ------------------------------------------------------------
+DROP TABLE IF EXISTS `support_tickets`;
+CREATE TABLE `support_tickets` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `ticket_number` VARCHAR(30) NOT NULL UNIQUE,
+  `agent_id` BIGINT NOT NULL,
+  `subject` VARCHAR(200) NOT NULL,
+  `category` ENUM('billing','ai_scanner','whatsapp','policy','general') NOT NULL DEFAULT 'general',
+  `priority` ENUM('low','medium','high','urgent') NOT NULL DEFAULT 'medium',
+  `status` ENUM('open','in_progress','resolved','closed') NOT NULL DEFAULT 'open',
+  `last_reply_at` DATETIME NULL,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (`agent_id`) REFERENCES `agents`(`id`) ON DELETE CASCADE,
+  INDEX `idx_st_agent` (`agent_id`),
+  INDEX `idx_st_status` (`status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
+-- Table: ticket_messages
+-- ------------------------------------------------------------
+DROP TABLE IF EXISTS `ticket_messages`;
+CREATE TABLE `ticket_messages` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `ticket_id` BIGINT NOT NULL,
+  `sender_user_id` BIGINT NOT NULL,
+  `sender_role` ENUM('agent','admin','support') NOT NULL DEFAULT 'agent',
+  `message` TEXT NOT NULL,
+  `attachment_path` VARCHAR(255) NULL,
+  `is_internal` BOOLEAN NOT NULL DEFAULT FALSE,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`ticket_id`) REFERENCES `support_tickets`(`id`) ON DELETE CASCADE,
+  INDEX `idx_tm_ticket` (`ticket_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ------------------------------------------------------------
+-- Table: agent_verifications
+-- ------------------------------------------------------------
+DROP TABLE IF EXISTS `agent_verifications`;
+CREATE TABLE `agent_verifications` (
+  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
+  `user_id` BIGINT NOT NULL,
+  `verification_type` ENUM('mobile_otp','email_token') NOT NULL,
+  `token_or_otp` VARCHAR(100) NOT NULL,
+  `expires_at` DATETIME NOT NULL,
+  `is_verified` BOOLEAN NOT NULL DEFAULT FALSE,
+  `verified_at` DATETIME NULL,
+  `attempts_count` INT NOT NULL DEFAULT 0,
+  `ip_address` VARCHAR(45) NULL,
+  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON DELETE CASCADE,
+  INDEX `idx_av_user` (`user_id`, `verification_type`),
+  INDEX `idx_av_token` (`token_or_otp`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 SET FOREIGN_KEY_CHECKS = 1;
 

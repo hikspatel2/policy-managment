@@ -768,6 +768,221 @@ function setupSchema($conn)
         INDEX idx_pr_user (user_id, created_at),
         INDEX idx_pr_ip (ip_address, created_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // Agent Subscription Plans
+    createTable($conn, 'subscription_plans', "CREATE TABLE IF NOT EXISTS subscription_plans (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        name VARCHAR(100) NOT NULL,
+        slug VARCHAR(100) NOT NULL UNIQUE,
+        description TEXT NULL,
+        monthly_price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+        quarterly_price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+        yearly_price DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+        validity_days INT NOT NULL DEFAULT 30,
+        max_customers INT NOT NULL DEFAULT 100,
+        max_policies INT NOT NULL DEFAULT 200,
+        monthly_ai_scans INT NOT NULL DEFAULT 50,
+        team_members_limit INT NOT NULL DEFAULT 1,
+        whatsapp_limit INT NOT NULL DEFAULT 500,
+        reports_access BOOLEAN NOT NULL DEFAULT TRUE,
+        advanced_features BOOLEAN NOT NULL DEFAULT FALSE,
+        is_trial BOOLEAN NOT NULL DEFAULT FALSE,
+        trial_days INT NOT NULL DEFAULT 0,
+        is_active BOOLEAN NOT NULL DEFAULT TRUE,
+        display_order INT NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        INDEX idx_plan_slug (slug),
+        INDEX idx_plan_active (is_active)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // Agent Subscriptions
+    createTable($conn, 'subscriptions', "CREATE TABLE IF NOT EXISTS subscriptions (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        agent_id BIGINT NOT NULL,
+        plan_id BIGINT NOT NULL,
+        billing_cycle ENUM('monthly','quarterly','yearly','trial') NOT NULL DEFAULT 'monthly',
+        start_date DATE NOT NULL,
+        expiry_date DATE NOT NULL,
+        status ENUM('pending','active','expired','cancelled','suspended','payment_failed') NOT NULL DEFAULT 'pending',
+        customer_count INT NOT NULL DEFAULT 0,
+        policy_count INT NOT NULL DEFAULT 0,
+        ai_scan_count INT NOT NULL DEFAULT 0,
+        whatsapp_count INT NOT NULL DEFAULT 0,
+        auto_renew BOOLEAN NOT NULL DEFAULT TRUE,
+        cancelled_at DATETIME NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+        FOREIGN KEY (plan_id) REFERENCES subscription_plans(id),
+        INDEX idx_sub_agent (agent_id),
+        INDEX idx_sub_status (status),
+        INDEX idx_sub_expiry (expiry_date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // Subscription Payment Records
+    createTable($conn, 'subscription_payments', "CREATE TABLE IF NOT EXISTS subscription_payments (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        subscription_id BIGINT NULL,
+        agent_id BIGINT NOT NULL,
+        plan_id BIGINT NOT NULL,
+        order_id VARCHAR(100) NULL,
+        payment_id VARCHAR(100) NULL,
+        payment_signature VARCHAR(255) NULL,
+        amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+        currency VARCHAR(10) NOT NULL DEFAULT 'INR',
+        billing_cycle ENUM('monthly','quarterly','yearly','trial') NOT NULL DEFAULT 'monthly',
+        payment_method VARCHAR(50) NOT NULL DEFAULT 'razorpay',
+        status ENUM('pending','completed','failed','refunded') NOT NULL DEFAULT 'pending',
+        invoice_number VARCHAR(50) NULL UNIQUE,
+        receipt_url VARCHAR(255) NULL,
+        webhook_payload LONGTEXT NULL,
+        paid_at DATETIME NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+        FOREIGN KEY (plan_id) REFERENCES subscription_plans(id),
+        INDEX idx_pay_order (order_id),
+        INDEX idx_pay_payment (payment_id),
+        INDEX idx_pay_agent (agent_id),
+        INDEX idx_pay_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // Policy Extractions (AI Policy Scanner Records)
+    createTable($conn, 'policy_extractions', "CREATE TABLE IF NOT EXISTS policy_extractions (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        document_id BIGINT NULL,
+        policy_entry_id BIGINT NULL,
+        agent_id BIGINT NOT NULL,
+        customer_id BIGINT NULL,
+        file_path VARCHAR(255) NOT NULL,
+        raw_text LONGTEXT NULL,
+        extracted_data LONGTEXT NULL,
+        confidence_scores TEXT NULL,
+        ai_provider VARCHAR(50) NOT NULL DEFAULT 'gemini',
+        scanning_status ENUM('uploaded','processing','completed','failed','manual_review') NOT NULL DEFAULT 'uploaded',
+        error_message TEXT NULL,
+        processing_time_ms INT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+        INDEX idx_pe_agent (agent_id),
+        INDEX idx_pe_status (scanning_status),
+        INDEX idx_pe_policy (policy_entry_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // 5-Stage Policy Expiry Reminder Schedules
+    createTable($conn, 'reminder_schedules', "CREATE TABLE IF NOT EXISTS reminder_schedules (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        policy_entry_id BIGINT NOT NULL,
+        agent_id BIGINT NOT NULL,
+        customer_id BIGINT NOT NULL,
+        reminder_stage ENUM('30_days','14_days','7_days','2_days','expiry_day','post_expiry') NOT NULL,
+        scheduled_date DATE NOT NULL,
+        scheduled_channel ENUM('whatsapp','email','both') NOT NULL DEFAULT 'both',
+        status ENUM('pending','sent','failed','cancelled','skipped') NOT NULL DEFAULT 'pending',
+        sent_at DATETIME NULL,
+        failure_reason TEXT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (policy_entry_id) REFERENCES policy_entries(id) ON DELETE CASCADE,
+        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+        INDEX idx_rs_status_date (status, scheduled_date),
+        INDEX idx_rs_policy (policy_entry_id),
+        INDEX idx_rs_agent (agent_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // Notification Logs
+    createTable($conn, 'notification_logs', "CREATE TABLE IF NOT EXISTS notification_logs (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        reminder_schedule_id BIGINT NULL,
+        policy_entry_id BIGINT NULL,
+        agent_id BIGINT NOT NULL,
+        customer_id BIGINT NOT NULL,
+        channel ENUM('whatsapp','email','sms') NOT NULL DEFAULT 'whatsapp',
+        recipient_contact VARCHAR(200) NOT NULL,
+        message_content TEXT NOT NULL,
+        template_id VARCHAR(100) NULL,
+        status ENUM('queued','sent','delivered','read','failed') NOT NULL DEFAULT 'sent',
+        provider_message_id VARCHAR(150) NULL,
+        provider_response TEXT NULL,
+        error_message TEXT NULL,
+        sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+        INDEX idx_nl_agent (agent_id),
+        INDEX idx_nl_status (status),
+        INDEX idx_nl_sent (sent_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // Customer Followups CRM Pipeline
+    createTable($conn, 'customer_followups', "CREATE TABLE IF NOT EXISTS customer_followups (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        policy_entry_id BIGINT NULL,
+        customer_id BIGINT NOT NULL,
+        agent_id BIGINT NOT NULL,
+        followup_stage ENUM('new_renewal','contacted','interested','quote_sent','negotiation','renewed','lost') NOT NULL DEFAULT 'new_renewal',
+        call_notes TEXT NULL,
+        next_followup_date DATE NULL,
+        assigned_agent_id BIGINT NULL,
+        is_completed BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
+        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+        INDEX idx_cf_agent (agent_id),
+        INDEX idx_cf_stage (followup_stage),
+        INDEX idx_cf_next (next_followup_date)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // Support Desk Tickets
+    createTable($conn, 'support_tickets', "CREATE TABLE IF NOT EXISTS support_tickets (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        ticket_number VARCHAR(30) NOT NULL UNIQUE,
+        agent_id BIGINT NOT NULL,
+        subject VARCHAR(200) NOT NULL,
+        category ENUM('billing','ai_scanner','whatsapp','policy','general') NOT NULL DEFAULT 'general',
+        priority ENUM('low','medium','high','urgent') NOT NULL DEFAULT 'medium',
+        status ENUM('open','in_progress','resolved','closed') NOT NULL DEFAULT 'open',
+        last_reply_at DATETIME NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+        INDEX idx_st_agent (agent_id),
+        INDEX idx_st_status (status)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // Ticket Conversation Messages
+    createTable($conn, 'ticket_messages', "CREATE TABLE IF NOT EXISTS ticket_messages (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        ticket_id BIGINT NOT NULL,
+        sender_user_id BIGINT NOT NULL,
+        sender_role ENUM('agent','admin','support') NOT NULL DEFAULT 'agent',
+        message TEXT NOT NULL,
+        attachment_path VARCHAR(255) NULL,
+        is_internal BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (ticket_id) REFERENCES support_tickets(id) ON DELETE CASCADE,
+        INDEX idx_tm_ticket (ticket_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    // Agent Mobile & Email Verification Tokens / OTPs
+    createTable($conn, 'agent_verifications', "CREATE TABLE IF NOT EXISTS agent_verifications (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        user_id BIGINT NOT NULL,
+        verification_type ENUM('mobile_otp','email_token') NOT NULL,
+        token_or_otp VARCHAR(100) NOT NULL,
+        expires_at DATETIME NOT NULL,
+        is_verified BOOLEAN NOT NULL DEFAULT FALSE,
+        verified_at DATETIME NULL,
+        attempts_count INT NOT NULL DEFAULT 0,
+        ip_address VARCHAR(45) NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+        INDEX idx_av_user (user_id, verification_type),
+        INDEX idx_av_token (token_or_otp)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 }
 
 // additive column/index/seed-setting fixups for existing installs
@@ -934,10 +1149,43 @@ function setupColumnFixups($conn)
         ['claims', 'date_of_event', "DATE NULL AFTER life_claim_type"],
         // Customer & Family Portal enhancements
         ['users', 'customer_id', "BIGINT NULL AFTER branch_id"],
+        ['users', 'status', "ENUM('pending_verification','verification_completed','pending_subscription','active','suspended','blocked') NOT NULL DEFAULT 'active' AFTER is_active"],
+        ['users', 'profile_setup_completed', "TINYINT(1) NOT NULL DEFAULT 0 AFTER status"],
+        ['users', 'mobile_verified_at', "DATETIME NULL AFTER profile_setup_completed"],
+        ['users', 'email_verified_at', "DATETIME NULL AFTER mobile_verified_at"],
+
+        ['agents', 'agency_name', "VARCHAR(200) NULL AFTER name"],
+        ['agents', 'referral_code', "VARCHAR(50) NULL AFTER ifsc_code"],
+        ['agents', 'referred_by_agent_id', "BIGINT NULL AFTER referral_code"],
+        ['agents', 'logo_path', "VARCHAR(255) NULL AFTER referred_by_agent_id"],
+        ['agents', 'city', "VARCHAR(100) NULL AFTER state"],
+        ['agents', 'pincode', "VARCHAR(10) NULL AFTER city"],
+        ['agents', 'whatsapp_consent', "TINYINT(1) NOT NULL DEFAULT 1 AFTER pincode"],
+        ['agents', 'email_consent', "TINYINT(1) NOT NULL DEFAULT 1 AFTER whatsapp_consent"],
+        ['agents', 'terms_accepted_at', "DATETIME NULL AFTER email_consent"],
+        ['agents', 'active_subscription_id', "BIGINT NULL AFTER terms_accepted_at"],
+
         ['customers', 'agent_id', "BIGINT NULL AFTER referred_by"],
         ['customers', 'family_head_id', "BIGINT NULL AFTER agent_id"],
         ['customers', 'family_relation', "VARCHAR(50) NULL DEFAULT 'Self' AFTER family_head_id"],
         ['customers', 'portal_user_id', "BIGINT NULL AFTER family_relation"],
+        ['customers', 'secondary_mobile', "VARCHAR(15) NULL AFTER mobile"],
+        ['customers', 'dob', "DATE NULL AFTER email"],
+        ['customers', 'gender', "ENUM('male','female','other') NULL AFTER dob"],
+        ['customers', 'city', "VARCHAR(100) NULL AFTER state"],
+        ['customers', 'pincode', "VARCHAR(10) NULL AFTER city"],
+        ['customers', 'primary_wa_consent', "TINYINT(1) NOT NULL DEFAULT 1 AFTER pincode"],
+        ['customers', 'secondary_wa_consent', "TINYINT(1) NOT NULL DEFAULT 0 AFTER primary_wa_consent"],
+        ['customers', 'email_consent', "TINYINT(1) NOT NULL DEFAULT 1 AFTER secondary_wa_consent"],
+        ['customers', 'consent_timestamp', "DATETIME NULL AFTER email_consent"],
+        ['customers', 'consent_source', "VARCHAR(50) DEFAULT 'agent_portal' AFTER consent_timestamp"],
+
+        ['policy_entries', 'previous_policy_id', "BIGINT NULL AFTER customer_id"],
+        ['policy_entries', 'renewal_status', "ENUM('original','renewed','pending_renewal') NOT NULL DEFAULT 'original' AFTER remarks"],
+        ['policy_entries', 'document_reference', "VARCHAR(100) NULL AFTER renewal_status"],
+        ['policy_entries', 'verification_status', "ENUM('pending_verification','verified','rejected') NOT NULL DEFAULT 'verified' AFTER document_reference"],
+        ['policy_entries', 'verified_by', "BIGINT NULL AFTER verification_status"],
+        ['policy_entries', 'verified_at', "DATETIME NULL AFTER verified_by"],
     ];
     foreach ($cols as [$t, $c, $def])
         addColumnIfNotExists($conn, $t, $c, $def);
@@ -953,12 +1201,16 @@ function setupColumnFixups($conn)
     addIndexIfNotExists($conn, 'policy_entries', 'idx_insurance_category', 'insurance_category');
     addIndexIfNotExists($conn, 'claims', 'idx_claim_category', 'claim_category');
     addIndexIfNotExists($conn, 'users', 'idx_customer_id', 'customer_id');
+    addIndexIfNotExists($conn, 'users', 'idx_user_status', 'status');
     addIndexIfNotExists($conn, 'customers', 'idx_cust_agent', 'agent_id');
     addIndexIfNotExists($conn, 'customers', 'idx_family_head_id', 'family_head_id');
     addIndexIfNotExists($conn, 'customers', 'idx_portal_user_id', 'portal_user_id');
     addIndexIfNotExists($conn, 'branches', 'idx_branch_code', 'branch_code');
-    addIndexIfNotExists($conn, 'customers', 'idx_cust_agent', 'agent_id');
     addIndexIfNotExists($conn, 'policy_entries', 'idx_prev_policy', 'previous_policy_id');
+    addIndexIfNotExists($conn, 'policy_entries', 'idx_renewal_status', 'renewal_status');
+    addIndexIfNotExists($conn, 'policy_entries', 'idx_verif_status', 'verification_status');
+    addIndexIfNotExists($conn, 'agents', 'idx_ag_active_sub', 'active_subscription_id');
+    addIndexIfNotExists($conn, 'agents', 'idx_ag_ref_code', 'referral_code');
     addIndexIfNotExists($conn, 'policy_entries', 'idx_deleted_at', 'deleted_at');
     addIndexIfNotExists($conn, 'bank_transactions', 'idx_other_income', 'other_income_id');
     addIndexIfNotExists($conn, 'bank_transactions', 'idx_reconciled', 'is_reconciled');
@@ -996,6 +1248,102 @@ function setupColumnFixups($conn)
     $conn->query("INSERT IGNORE INTO vehicle_categories (name) VALUES ('Two Wheeler'),('Car'),('Commercial'),('Other')");
     echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Vehicle categories verified</div>';
 
+    // Seed default subscription plans (Starter, Professional, Enterprise, Free Trial)
+    $plans = [
+        [
+            'name' => 'Starter Agent',
+            'slug' => 'starter-agent',
+            'description' => 'Ideal for independent agents starting their insurance portfolio.',
+            'monthly_price' => 499.00,
+            'quarterly_price' => 1299.00,
+            'yearly_price' => 4499.00,
+            'validity_days' => 30,
+            'max_customers' => 100,
+            'max_policies' => 200,
+            'monthly_ai_scans' => 30,
+            'team_members_limit' => 1,
+            'whatsapp_limit' => 300,
+            'reports_access' => 1,
+            'advanced_features' => 0,
+            'is_trial' => 0,
+            'trial_days' => 0,
+            'display_order' => 1
+        ],
+        [
+            'name' => 'Professional Agent',
+            'slug' => 'professional-agent',
+            'description' => 'Most popular plan for growing insurance agents with automated reminders and AI scanner.',
+            'monthly_price' => 999.00,
+            'quarterly_price' => 2699.00,
+            'yearly_price' => 8999.00,
+            'validity_days' => 30,
+            'max_customers' => 500,
+            'max_policies' => 1000,
+            'monthly_ai_scans' => 150,
+            'team_members_limit' => 3,
+            'whatsapp_limit' => 1500,
+            'reports_access' => 1,
+            'advanced_features' => 1,
+            'is_trial' => 0,
+            'trial_days' => 0,
+            'display_order' => 2
+        ],
+        [
+            'name' => 'Agency Enterprise',
+            'slug' => 'agency-enterprise',
+            'description' => 'Unlimited capacity for established agencies and top insurance performers.',
+            'monthly_price' => 1999.00,
+            'quarterly_price' => 5499.00,
+            'yearly_price' => 17999.00,
+            'validity_days' => 30,
+            'max_customers' => 999999,
+            'max_policies' => 999999,
+            'monthly_ai_scans' => 500,
+            'team_members_limit' => 10,
+            'whatsapp_limit' => 5000,
+            'reports_access' => 1,
+            'advanced_features' => 1,
+            'is_trial' => 0,
+            'trial_days' => 0,
+            'display_order' => 3
+        ],
+        [
+            'name' => '14-Day Free Trial',
+            'slug' => 'free-trial',
+            'description' => 'Experience the full power of AI policy scanning and WhatsApp automated reminders risk-free.',
+            'monthly_price' => 0.00,
+            'quarterly_price' => 0.00,
+            'yearly_price' => 0.00,
+            'validity_days' => 14,
+            'max_customers' => 25,
+            'max_policies' => 50,
+            'monthly_ai_scans' => 15,
+            'team_members_limit' => 1,
+            'whatsapp_limit' => 100,
+            'reports_access' => 1,
+            'advanced_features' => 1,
+            'is_trial' => 1,
+            'trial_days' => 14,
+            'display_order' => 0
+        ]
+    ];
+    $pStmt = $conn->prepare("INSERT IGNORE INTO subscription_plans (name, slug, description, monthly_price, quarterly_price, yearly_price, validity_days, max_customers, max_policies, monthly_ai_scans, team_members_limit, whatsapp_limit, reports_access, advanced_features, is_trial, trial_days, display_order) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+    if ($pStmt) {
+        foreach ($plans as $p) {
+            $pStmt->bind_param("sssdddiiiiiiiiiii",
+                $p['name'], $p['slug'], $p['description'],
+                $p['monthly_price'], $p['quarterly_price'], $p['yearly_price'],
+                $p['validity_days'], $p['max_customers'], $p['max_policies'],
+                $p['monthly_ai_scans'], $p['team_members_limit'], $p['whatsapp_limit'],
+                $p['reports_access'], $p['advanced_features'], $p['is_trial'],
+                $p['trial_days'], $p['display_order']
+            );
+            $pStmt->execute();
+        }
+        $pStmt->close();
+    }
+    echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Subscription plans verified</div>';
+
     // seed settings — INSERT IGNORE
     $settings = [
         'site_name' => 'Insurance Management System',
@@ -1008,7 +1356,20 @@ function setupColumnFixups($conn)
         'wa_country_code' => '91',
         'smtp_enabled' => '0',
         'smtp_port' => '587',
-        'smtp_encryption' => 'tls'
+        'smtp_encryption' => 'tls',
+        'razorpay_enabled' => '0',
+        'razorpay_key_id' => '',
+        'razorpay_key_secret' => '',
+        'razorpay_webhook_secret' => '',
+        'payment_offline_enabled' => '1',
+        'ai_provider' => 'gemini',
+        'gemini_api_key' => '',
+        'claude_api_key' => '',
+        'ai_model' => 'gemini-1.5-flash',
+        'wa_cloud_enabled' => '0',
+        'wa_cloud_api_token' => '',
+        'wa_phone_number_id' => '',
+        'wa_business_account_id' => ''
     ];
     $stmt = $conn->prepare("INSERT IGNORE INTO system_settings (setting_key, setting_value) VALUES (?, ?)");
     foreach ($settings as $k => $v) {
@@ -1026,7 +1387,7 @@ function setupColumnFixups($conn)
 function setupDirectories()
 {
     echo '<br><div class="log-item log-info"><i class="fas fa-folder"></i> <strong>Checking upload directories...</strong></div>';
-    $dirs = ['uploads', 'uploads/profiles', 'uploads/policies', 'uploads/payouts', 'uploads/receipts', 'uploads/claims', 'uploads/logos'];
+    $dirs = ['uploads', 'uploads/profiles', 'uploads/policies', 'uploads/payouts', 'uploads/receipts', 'uploads/claims', 'uploads/logos', 'uploads/invoices', 'uploads/tickets'];
     foreach ($dirs as $name) {
         $dir = __DIR__ . '/' . $name;
         if (!file_exists($dir)) {
@@ -1042,7 +1403,7 @@ function setupDirectories()
     // no scripts anywhere in uploads; documents / receipts / claims / payouts are private — the app streams them after a login check
     $deny = "<IfModule mod_authz_core.c>\n    Require all denied\n</IfModule>\n<IfModule !mod_authz_core.c>\n    Order allow,deny\n    Deny from all\n</IfModule>\n";
     $ok = file_put_contents(__DIR__ . '/uploads/.htaccess', "# no scripts in uploads\n<FilesMatch \"\\.(php[0-9]?|phtml|phar|pl|py|jsp|asp|html?|shtml|sh|cgi)$\">\n" . $deny . "</FilesMatch>\n") !== false;
-    foreach (['policies', 'receipts', 'payouts', 'claims'] as $d) {
+    foreach (['policies', 'receipts', 'payouts', 'claims', 'invoices', 'tickets'] as $d) {
         $ok = file_put_contents(__DIR__ . "/uploads/$d/.htaccess", "# private — served only through the app\n" . $deny) !== false && $ok;
     }
     if ($ok) {

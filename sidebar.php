@@ -84,6 +84,9 @@ if ($role === 'customer') {
     $sb_groups = [
         ['agents-submenu', 'Agents', [
             ['agents.php', 'agents', 'fa-user-tie', 'Agent List'],
+            ['agent_plans.php', 'agent_plans', 'fa-crown', 'Subscription Plans'],
+            ['customer_followups.php', 'customer_followups', 'fa-headset', 'Renewal Follow-ups'],
+            ['support_tickets.php', 'support_tickets', 'fa-circle-question', 'Support Tickets'],
             ['agent_transactions.php', 'agent_transactions', 'fa-receipt', 'Agent Accounts'],
         ]],
         ['buyers-submenu', 'Buyers', [
@@ -114,19 +117,27 @@ if ($role === 'customer') {
 } else {
     $sb_main = [
         ['dashboard.php', 'dashboard', 'fa-chart-line', 'Agent Dashboard'],
+        ['policy_upload.php', 'policy_upload', 'fa-file-arrow-up', 'Upload & Scan Policy'],
         ['policy_entries.php', 'policies', 'fa-file-invoice', 'My Policies'],
+        ['customer_followups.php', 'customer_followups', 'fa-headset', 'Renewal Follow-ups'],
+        ['customers.php', 'customers', 'fa-users', 'My Customers'],
         ['claims.php', 'claims', 'fa-car-burst', 'My Claims', 'claims', $sb_badges['claims']],
         ['vehicles.php', 'vehicles', 'fa-car', 'My Vehicles'],
-        ['customers.php', 'customers', 'fa-users', 'My Customers'],
         ['agents.php', 'agents', 'fa-id-card', 'My Profile'],
         ['agent_payout_charts.php', 'agent_payouts', 'fa-hand-holding-usd', 'My Payout Chart'],
         ['agent_transactions.php', 'agent_transactions', 'fa-receipt', 'My Account Statement'],
         ['notifications.php', 'notifications', 'fa-bell', 'Notifications', 'notif', $sb_badges['notif']],
     ];
-    $sb_groups = [['account-submenu', 'My Account', [
-        ['account.php', 'account', 'fa-user', 'Account Settings'],
-        ['logs.php', 'logs', 'fa-history', 'Activity Logs'],
-    ]]];
+    $sb_groups = [
+        ['subscription-submenu', 'Subscription & Support', [
+            ['agent_plans.php', 'agent_plans', 'fa-crown', 'My Subscription'],
+            ['support_tickets.php', 'support_tickets', 'fa-circle-question', 'Helpdesk / Support'],
+        ]],
+        ['account-submenu', 'My Account', [
+            ['account.php', 'account', 'fa-user', 'Account Settings'],
+            ['logs.php', 'logs', 'fa-history', 'Activity Logs'],
+        ]]
+    ];
 }
 ?>
 <!-- Sidebar -->

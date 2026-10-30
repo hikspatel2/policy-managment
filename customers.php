@@ -322,18 +322,30 @@ if (isset($_GET['action'])) {
                 if (is_string($ex)) { $conn->close(); echo json_encode(['success' => false, 'message' => $ex]); exit(); }
                 [$agentId, $ckyc, $waNo, $dob, $city, $pin] = $ex;
 
-                // Agent role auto-assigns itself
+                // Agent role auto-assigns itself and enforces limit
                 if ($role === 'agent') {
                     $agentId = agentIdForUser($conn, $user_id);
+                    $cLimit = checkAgentSubscriptionLimit($conn, $agentId, 'customer');
+                    if (!$cLimit['allowed']) {
+                        $conn->close();
+                        echo json_encode(['success' => false, 'message' => $cLimit['message']]);
+                        exit();
+                    }
                 }
+
+                $secMobile = trim($_POST['secondary_mobile'] ?? '');
+                $gender = trim($_POST['gender'] ?? '');
+                $waConsent1 = isset($_POST['primary_wa_consent']) ? (int)$_POST['primary_wa_consent'] : 1;
+                $waConsent2 = isset($_POST['secondary_wa_consent']) ? (int)$_POST['secondary_wa_consent'] : 0;
+                $emailConsent = isset($_POST['email_consent']) ? (int)$_POST['email_consent'] : 1;
 
                 // insert without referral_code first
                 $emailVal = $email ?: null;
                 $addressVal = $address ?: null;
                 $stateVal = $state ?: null;
 
-                $stmt = $conn->prepare("INSERT INTO customers (name, mobile, email, address, state, referred_by, agent_id, family_head_id, family_relation, ckyc_number, whatsapp_number, date_of_birth, city, pincode, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-                $stmt->bind_param("sssssiisssssssi", $name, $mobile, $emailVal, $addressVal, $stateVal, $referredBy, $agentId, $familyHeadId, $familyRelation, $ckyc, $waNo, $dob, $city, $pin, $user_id);
+                $stmt = $conn->prepare("INSERT INTO customers (name, mobile, secondary_mobile, email, address, state, gender, primary_wa_consent, secondary_wa_consent, email_consent, consent_timestamp, consent_source, referred_by, agent_id, family_head_id, family_relation, ckyc_number, whatsapp_number, date_of_birth, city, pincode, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), 'portal', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                $stmt->bind_param("sssssssiiiiiisssssssi", $name, $mobile, $secMobile, $emailVal, $addressVal, $stateVal, $gender, $waConsent1, $waConsent2, $emailConsent, $referredBy, $agentId, $familyHeadId, $familyRelation, $ckyc, $waNo, $dob, $city, $pin, $user_id);
 
                 if (!$stmt->execute()) {
                     $stmt->close(); $conn->close();

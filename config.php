@@ -920,6 +920,306 @@ function canSeePolicy($conn, $pid) {
     return false;
 }
 
+// ============================================================
+// AGENT SUBSCRIPTION, USAGE & LIMIT ENFORCEMENT HELPERS
+// ============================================================
+
+function getAgentSubscription($conn, $agentId) {
+    $aid = (int)$agentId;
+    if ($aid <= 0) return null;
+
+    $stmt = $conn->prepare("SELECT s.*, p.name AS plan_name, p.slug AS plan_slug, p.description AS plan_description,
+                                   p.max_customers, p.max_policies, p.monthly_ai_scans, p.whatsapp_limit,
+                                   p.reports_access, p.advanced_features, p.team_members_limit,
+                                   DATEDIFF(s.expiry_date, CURDATE()) AS days_left
+                            FROM subscriptions s
+                            JOIN subscription_plans p ON s.plan_id = p.id
+                            WHERE s.agent_id = ?
+                            ORDER BY (s.status = 'active' AND s.expiry_date >= CURDATE()) DESC, s.id DESC
+                            LIMIT 1");
+    if (!$stmt) return null;
+    $stmt->bind_param('i', $aid);
+    $stmt->execute();
+    $sub = $stmt->get_result()->fetch_assoc();
+    $stmt->close();
+
+    if (!$sub) return null;
+
+    // Refresh actual customer and policy counts
+    $cRes = $conn->query("SELECT COUNT(*) FROM customers WHERE agent_id = $aid AND is_active = 1");
+    $sub['actual_customer_count'] = ($cRes && ($r = $cRes->fetch_row())) ? (int)$r[0] : 0;
+
+    $pRes = $conn->query("SELECT COUNT(*) FROM policy_entries WHERE agent_id = $aid AND deleted_at IS NULL");
+    $sub['actual_policy_count'] = ($pRes && ($r = $pRes->fetch_row())) ? (int)$r[0] : 0;
+
+    $sub['is_valid'] = ($sub['status'] === 'active' && (int)$sub['days_left'] >= 0);
+    return $sub;
+}
+
+function checkAgentSubscriptionLimit($conn, $agentId, $resource = 'general') {
+    $role = $_SESSION['role'] ?? '';
+    if ($role === 'admin' || $role === 'manager') {
+        return ['allowed' => true, 'current' => 0, 'limit' => 999999, 'message' => ''];
+    }
+
+    $aid = (int)$agentId;
+    if ($aid <= 0) {
+        return ['allowed' => false, 'message' => 'Invalid agent account.'];
+    }
+
+    $sub = getAgentSubscription($conn, $aid);
+    if (!$sub || !$sub['is_valid']) {
+        return [
+            'allowed' => false,
+            'reason' => 'subscription_expired',
+            'message' => 'Active subscription plan required. Please select or renew your subscription.',
+            'redirect' => 'agent_plans.php'
+        ];
+    }
+
+    switch ($resource) {
+        case 'customer':
+            $current = (int)$sub['actual_customer_count'];
+            $max = (int)$sub['max_customers'];
+            if ($current >= $max) {
+                return [
+                    'allowed' => false,
+                    'reason' => 'limit_exceeded',
+                    'current' => $current,
+                    'limit' => $max,
+                    'message' => "Customer limit reached ($current / $max). Please upgrade your plan."
+                ];
+            }
+            return ['allowed' => true, 'current' => $current, 'limit' => $max];
+
+        case 'policy':
+            $current = (int)$sub['actual_policy_count'];
+            $max = (int)$sub['max_policies'];
+            if ($current >= $max) {
+                return [
+                    'allowed' => false,
+                    'reason' => 'limit_exceeded',
+                    'current' => $current,
+                    'limit' => $max,
+                    'message' => "Policy limit reached ($current / $max). Please upgrade your plan."
+                ];
+            }
+            return ['allowed' => true, 'current' => $current, 'limit' => $max];
+
+        case 'ai_scan':
+            $current = (int)$sub['ai_scan_count'];
+            $max = (int)$sub['monthly_ai_scans'];
+            if ($current >= $max) {
+                return [
+                    'allowed' => false,
+                    'reason' => 'limit_exceeded',
+                    'current' => $current,
+                    'limit' => $max,
+                    'message' => "Monthly AI Policy Scan limit reached ($current / $max). Please upgrade your plan."
+                ];
+            }
+            return ['allowed' => true, 'current' => $current, 'limit' => $max];
+
+        case 'whatsapp':
+            $current = (int)$sub['whatsapp_count'];
+            $max = (int)$sub['whatsapp_limit'];
+            if ($current >= $max) {
+                return [
+                    'allowed' => false,
+                    'reason' => 'limit_exceeded',
+                    'current' => $current,
+                    'limit' => $max,
+                    'message' => "WhatsApp notification limit reached ($current / $max). Please upgrade your plan."
+                ];
+            }
+            return ['allowed' => true, 'current' => $current, 'limit' => $max];
+
+        default:
+            return ['allowed' => true];
+    }
+}
+
+function incrementAgentUsage($conn, $agentId, $resource, $qty = 1) {
+    $aid = (int)$agentId;
+    $qty = (int)$qty;
+    if ($aid <= 0 || $qty <= 0) return false;
+
+    $col = ($resource === 'ai_scan') ? 'ai_scan_count' : (($resource === 'whatsapp') ? 'whatsapp_count' : null);
+    if (!$col) return false;
+
+    $st = $conn->prepare("UPDATE subscriptions SET $col = $col + ? WHERE agent_id = ? AND status = 'active' ORDER BY id DESC LIMIT 1");
+    if ($st) {
+        $st->bind_param('ii', $qty, $aid);
+        $st->execute();
+        $st->close();
+        return true;
+    }
+    return false;
+}
+
+function activateAgentSubscription($conn, $agentId, $planId, $billingCycle = 'monthly', $paymentId = null, $orderId = null, $method = 'razorpay', $amount = 0.0) {
+    $aid = (int)$agentId;
+    $pid = (int)$planId;
+    if ($aid <= 0 || $pid <= 0) return false;
+
+    // Fetch plan
+    $pStmt = $conn->prepare("SELECT * FROM subscription_plans WHERE id = ? LIMIT 1");
+    $pStmt->bind_param('i', $pid);
+    $pStmt->execute();
+    $plan = $pStmt->get_result()->fetch_assoc();
+    $pStmt->close();
+    if (!$plan) return false;
+
+    // Calculate duration in days
+    $days = 30;
+    if ($billingCycle === 'quarterly') {
+        $days = 90;
+        if ($amount <= 0) $amount = (float)$plan['quarterly_price'];
+    } elseif ($billingCycle === 'yearly') {
+        $days = 365;
+        if ($amount <= 0) $amount = (float)$plan['yearly_price'];
+    } elseif ($billingCycle === 'trial' || $plan['is_trial']) {
+        $days = (int)($plan['trial_days'] ?: 14);
+        $amount = 0.00;
+        $billingCycle = 'trial';
+    } else {
+        $days = (int)($plan['validity_days'] ?: 30);
+        if ($amount <= 0) $amount = (float)$plan['monthly_price'];
+    }
+
+    $startDate = date('Y-m-d');
+    $expiryDate = date('Y-m-d', strtotime("+$days days"));
+
+    // Deactivate previous active subscriptions
+    $conn->query("UPDATE subscriptions SET status = 'expired' WHERE agent_id = $aid AND status = 'active'");
+
+    // Insert new subscription
+    $subStmt = $conn->prepare("INSERT INTO subscriptions (agent_id, plan_id, billing_cycle, start_date, expiry_date, status, auto_renew) VALUES (?, ?, ?, ?, ?, 'active', 1)");
+    $subStmt->bind_param('iisss', $aid, $pid, $billingCycle, $startDate, $expiryDate);
+    $subStmt->execute();
+    $subscriptionId = $conn->insert_id;
+    $subStmt->close();
+
+    // Create Payment Record & Invoice
+    $invNum = 'INV-' . date('Y') . '-' . strtoupper(substr(uniqid(), -6));
+    if (!$orderId) $orderId = 'ORD-' . strtoupper(substr(uniqid(), -8));
+    if (!$paymentId) $paymentId = 'PAY-' . strtoupper(substr(uniqid(), -8));
+
+    $payStmt = $conn->prepare("INSERT INTO subscription_payments (subscription_id, agent_id, plan_id, order_id, payment_id, amount, billing_cycle, payment_method, status, invoice_number, paid_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, NOW())");
+    $payStmt->bind_param('iiissdsss', $subscriptionId, $aid, $pid, $orderId, $paymentId, $amount, $billingCycle, $method, $invNum);
+    $payStmt->execute();
+    $payStmt->close();
+
+    // Update agent's active_subscription_id and user status
+    $conn->query("UPDATE agents SET active_subscription_id = $subscriptionId WHERE id = $aid");
+    $aRow = $conn->query("SELECT user_id, email, name FROM agents WHERE id = $aid")->fetch_assoc();
+    if ($aRow && !empty($aRow['user_id'])) {
+        $uid = (int)$aRow['user_id'];
+        $conn->query("UPDATE users SET status = 'active', is_active = 1 WHERE id = $uid");
+
+        // Optional confirmation email
+        if (!empty($aRow['email'])) {
+            $subj = "Subscription Activated: " . $plan['name'];
+            $body = "<p>Dear " . htmlspecialchars($aRow['name']) . ",</p>"
+                  . "<p>Your subscription to <strong>" . htmlspecialchars($plan['name']) . "</strong> has been successfully activated!</p>"
+                  . "<p><strong>Billing Cycle:</strong> " . ucfirst($billingCycle) . "<br>"
+                  . "<strong>Valid Until:</strong> " . date('d M Y', strtotime($expiryDate)) . "<br>"
+                  . "<strong>Invoice Number:</strong> " . $invNum . "<br>"
+                  . "<strong>Amount Paid:</strong> " . number_format($amount, 2) . "</p>"
+                  . "<p>You can now manage your customers, policies, and AI scans from your dashboard.</p>";
+            sendEmail($aRow['email'], $subj, emailLayout($subj, $body));
+        }
+    }
+
+    return $subscriptionId;
+}
+
+// 5-Stage Policy Expiry Reminders Scheduler
+function schedulePolicyReminders($conn, $policyId, $agentId, $customerId, $expiryDate) {
+    $pid = (int)$policyId;
+    $aid = (int)$agentId;
+    $cid = (int)$customerId;
+    if ($pid <= 0 || empty($expiryDate)) return false;
+
+    // Check if reminders already exist for this policy; cancel any pending old reminders
+    $conn->query("UPDATE reminder_schedules SET status = 'cancelled' WHERE policy_entry_id = $pid AND status = 'pending'");
+
+    $stages = [
+        '30_days'    => '-30 days',
+        '14_days'    => '-14 days',
+        '7_days'     => '-7 days',
+        '2_days'     => '-2 days',
+        'expiry_day' => '0 days'
+    ];
+
+    $expTs = strtotime($expiryDate);
+    $today = date('Y-m-d');
+    $stmt = $conn->prepare("INSERT INTO reminder_schedules (policy_entry_id, agent_id, customer_id, reminder_stage, scheduled_date, scheduled_channel, status) VALUES (?, ?, ?, ?, ?, 'both', 'pending')");
+
+    foreach ($stages as $stage => $offset) {
+        $schedDate = date('Y-m-d', strtotime($offset, $expTs));
+        // Only schedule if date is today or in future
+        if ($schedDate >= $today) {
+            $stmt->bind_param('iiiss', $pid, $aid, $cid, $stage, $schedDate);
+            $stmt->execute();
+        }
+    }
+    $stmt->close();
+    return true;
+}
+
+// WhatsApp Cloud API Sender
+function sendWhatsAppCloudMessage($toPhone, $messageText, $templateName = null, array $templateParams = []) {
+    $enabled = getSetting('wa_cloud_enabled', '0');
+    $token = getSetting('wa_cloud_api_token', '');
+    $phoneId = getSetting('wa_phone_number_id', '');
+
+    if ($enabled !== '1' || empty($token) || empty($phoneId)) {
+        return ['success' => false, 'error' => 'WhatsApp Cloud API is not configured or disabled'];
+    }
+
+    $url = "https://graph.facebook.com/v20.0/{$phoneId}/messages";
+    $payload = [
+        'messaging_product' => 'whatsapp',
+        'to' => waNumber($toPhone),
+    ];
+
+    if ($templateName) {
+        $payload['type'] = 'template';
+        $payload['template'] = [
+            'name' => $templateName,
+            'language' => ['code' => 'en'],
+            'components' => $templateParams
+        ];
+    } else {
+        $payload['type'] = 'text';
+        $payload['text'] = ['body' => $messageText];
+    }
+
+    $ch = curl_init($url);
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_POSTFIELDS => json_encode($payload),
+        CURLOPT_HTTPHEADER => [
+            'Authorization: Bearer ' . $token,
+            'Content-Type: application/json'
+        ],
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 15
+    ]);
+    $res = curl_exec($ch);
+    $httpCode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $err = curl_error($ch);
+    curl_close($ch);
+
+    if ($err) return ['success' => false, 'error' => $err];
+    $json = json_decode($res, true);
+    if ($httpCode >= 200 && $httpCode < 300 && !empty($json['messages'][0]['id'])) {
+        return ['success' => true, 'message_id' => $json['messages'][0]['id'], 'raw' => $json];
+    }
+    return ['success' => false, 'error' => $json['error']['message'] ?? 'API error ' . $httpCode, 'raw' => $json];
+}
+
 // expiry alerts to admins + the policy's agent, then active -> expired. renewed policies are skipped
 function runExpiryCheck($conn) {
     $st = $conn->prepare("SELECT pe.id, pe.policy_number, pe.customer_name, pe.agent_id, pe.policy_end_date, pe.vehicle_number, pe.company_name, a.user_id AS agent_user_id
@@ -947,7 +1247,95 @@ function runExpiryCheck($conn) {
     }
     $ins->close();
     $conn->query("UPDATE policy_entries SET status = 'expired' WHERE status = 'active' AND policy_end_date < CURDATE()");
-    return ['notifications_created' => $created, 'policies_expired' => $conn->affected_rows];
+    $remindersProcessed = processDueReminders($conn);
+    return ['notifications_created' => $created, 'policies_expired' => $conn->affected_rows, 'reminders_sent' => $remindersProcessed];
+}
+
+function processDueReminders($conn) {
+    $today = date('Y-m-d');
+    $schedRes = $conn->query("
+        SELECT rs.*, pe.policy_number, pe.company_name, pe.policy_end_date, pe.vehicle_number, pe.plan_name,
+               c.name AS customer_name, c.mobile AS customer_mobile, c.email AS customer_email,
+               c.primary_wa_consent, c.email_consent
+        FROM reminder_schedules rs
+        JOIN policy_entries pe ON pe.id = rs.policy_entry_id
+        JOIN customers c ON c.id = rs.customer_id
+        WHERE rs.status = 'pending' AND rs.scheduled_date <= CURDATE()
+        ORDER BY rs.scheduled_date ASC
+        LIMIT 100
+    ");
+
+    $processed = 0;
+    if (!$schedRes) return 0;
+
+    $branding = getBranding();
+    $bizName = $branding['site_name'];
+
+    while ($r = $schedRes->fetch_assoc()) {
+        $rsId = (int)$r['id'];
+        $pid = (int)$r['policy_entry_id'];
+        $aid = (int)$r['agent_id'];
+        $cid = (int)$r['customer_id'];
+        $stage = $r['reminder_stage'];
+        $stageDays = [
+            '30_days' => '30 days',
+            '14_days' => '14 days',
+            '7_days'  => '7 days',
+            '2_days'  => '2 days',
+            'expiry_day' => 'TODAY'
+        ][$stage] ?? 'soon';
+
+        $text = "Dear {$r['customer_name']}, your {$r['company_name']} policy {$r['policy_number']} expires in {$stageDays} on {$r['policy_end_date']}. Please contact us to renew on time. Regards, {$bizName}";
+
+        $waSent = false;
+        $emailSent = false;
+
+        // Check WhatsApp consent & agent limit
+        if (!empty($r['customer_mobile']) && !empty($r['primary_wa_consent'])) {
+            $limitChk = checkAgentSubscriptionLimit($conn, $aid, 'whatsapp');
+            if ($limitChk['allowed']) {
+                $waRes = sendWhatsAppCloudMessage($r['customer_mobile'], $text);
+                $status = $waRes['success'] ? 'sent' : 'failed';
+                $msgId = $waRes['message_id'] ?? null;
+                $errMsg = $waRes['error'] ?? null;
+
+                $nl = $conn->prepare("INSERT INTO notification_logs (reminder_schedule_id, policy_entry_id, agent_id, customer_id, channel, recipient_contact, message_content, status, provider_message_id, error_message) VALUES (?, ?, ?, ?, 'whatsapp', ?, ?, ?, ?, ?)");
+                $nl->bind_param('iiiisssss', $rsId, $pid, $aid, $cid, $r['customer_mobile'], $text, $status, $msgId, $errMsg);
+                $nl->execute();
+                $nl->close();
+
+                if ($waRes['success']) {
+                    incrementAgentUsage($conn, $aid, 'whatsapp');
+                    $waSent = true;
+                }
+            }
+        }
+
+        // Check Email consent
+        if (!empty($r['customer_email']) && !empty($r['email_consent'])) {
+            $subj = "Policy Expiry Notice: {$r['policy_number']} - {$bizName}";
+            $body = emailLayout($subj, "
+                <p>Dear " . htmlspecialchars($r['customer_name']) . ",</p>
+                <p>This is a friendly reminder that your <strong>" . htmlspecialchars($r['company_name']) . "</strong> insurance policy <strong>" . htmlspecialchars($r['policy_number']) . "</strong> expires in <strong>{$stageDays}</strong> on <strong>" . date('d M Y', strtotime($r['policy_end_date'])) . "</strong>.</p>
+                <p>To avoid coverage lapse and safeguard your No Claim Bonus (NCB), please reply to this email or contact your agent to renew.</p>
+            ");
+            $eOk = @sendEmail($r['customer_email'], $subj, $body);
+            $eStatus = $eOk ? 'sent' : 'failed';
+
+            $nl = $conn->prepare("INSERT INTO notification_logs (reminder_schedule_id, policy_entry_id, agent_id, customer_id, channel, recipient_contact, message_content, status) VALUES (?, ?, ?, ?, 'email', ?, ?, ?)");
+            $nl->bind_param('iiiisss', $rsId, $pid, $aid, $cid, $r['customer_email'], $text, $eStatus);
+            $nl->execute();
+            $nl->close();
+            $emailSent = true;
+        }
+
+        // Mark schedule record
+        $finalStatus = ($waSent || $emailSent) ? 'sent' : 'failed';
+        $conn->query("UPDATE reminder_schedules SET status = '{$finalStatus}', sent_at = NOW() WHERE id = {$rsId}");
+        $processed++;
+    }
+
+    return $processed;
 }
 
 // once a day — cron_expiry.php, or the first page load of the day (sidebar.php)
