@@ -93,19 +93,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($fileSize > 15 * 1024 * 1024) {
                 $error = 'Policy document exceeds maximum allowed size of 15 MB.';
             } else {
-                $finfo = new finfo(FILEINFO_MIME_TYPE);
-                $mimeType = $finfo->file($tmpPath);
-                $allowedMimes = [
-                    'application/pdf' => 'pdf',
-                    'image/jpeg' => 'jpg',
-                    'image/png' => 'png',
-                    'image/webp' => 'webp'
-                ];
+                $fileExt = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+                if ($fileExt === 'jpeg') $fileExt = 'jpg';
+                $allowedExts = ['pdf', 'jpg', 'png', 'webp'];
 
-                if (!array_key_exists($mimeType, $allowedMimes)) {
-                    $error = 'Invalid file type (' . htmlspecialchars($mimeType) . '). Only PDF and JPG/PNG documents are supported.';
+                if (!in_array($fileExt, $allowedExts, true)) {
+                    $error = 'Invalid file type (.' . htmlspecialchars($fileExt) . '). Only PDF, JPG, and PNG documents are supported.';
                 } else {
-                    $ext = $allowedMimes[$mimeType];
+                    $ext = $fileExt;
                     $storedName = storedName('pol', $ext);
                     $relPath = 'uploads/policies/' . $storedName;
                     $fullPath = __DIR__ . '/' . $relPath;
@@ -117,9 +112,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!move_uploaded_file($tmpPath, $fullPath)) {
                         $error = 'Failed to save uploaded file to storage. Check folder permissions.';
                     } else {
+                        // Safe agent assignment: use logged-in agent ID, or selected agent for staff, or NULL
+                        $assignedAgentId = ($role === 'agent') ? $aid : (!empty($_POST['agent_id']) ? (int)$_POST['agent_id'] : null);
+                        if ($assignedAgentId && $assignedAgentId <= 0) $assignedAgentId = null;
+
                         // Insert policy extraction record
-                        $insExt = $conn->prepare("INSERT INTO policy_extractions (agent_id, customer_id, file_path, scanning_status) VALUES (?, ?, ?, 'uploaded')");
-                        $insExt->bind_param("iis", $aid, $customerId, $relPath);
+                        if ($assignedAgentId) {
+                            $insExt = $conn->prepare("INSERT INTO policy_extractions (agent_id, customer_id, file_path, scanning_status) VALUES (?, ?, ?, 'uploaded')");
+                            $insExt->bind_param("iis", $assignedAgentId, $customerId, $relPath);
+                        } else {
+                            $insExt = $conn->prepare("INSERT INTO policy_extractions (agent_id, customer_id, file_path, scanning_status) VALUES (NULL, ?, ?, 'uploaded')");
+                            $insExt->bind_param("is", $customerId, $relPath);
+                        }
                         $insExt->execute();
                         $extId = $conn->insert_id;
                         $insExt->close();
@@ -228,6 +232,21 @@ $categories = getInsuranceCategories($conn, true);
                         <?php endforeach; ?>
                     </div>
                 </div>
+
+                                <?php if ($role !== 'agent'): ?>
+                <!-- Agent Assignment (Staff only) -->
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label for="agent_id" style="font-weight: 600; color: #1e293b;"><i class="fas fa-user-tie"></i> Assign to Agent (Optional)</label>
+                    <select id="agent_id" name="agent_id" style="width: 100%; padding: 10px; border-radius: 8px; border: 1px solid #cbd5e1;">
+                        <option value="">-- Direct Company / In-House Policy (No Agent) --</option>
+                        <?php foreach ($agentsList as $ag): ?>
+                            <option value="<?php echo $ag['id']; ?>">
+                                <?php echo htmlspecialchars($ag['name']); ?> (<?php echo htmlspecialchars($ag['agent_code']); ?>)
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <?php endif; ?>
 
                 <!-- Customer Selection -->
                 <div class="form-group" style="margin-bottom: 20px;">

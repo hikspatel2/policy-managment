@@ -852,7 +852,7 @@ function setupSchema($conn)
         id BIGINT AUTO_INCREMENT PRIMARY KEY,
         document_id BIGINT NULL,
         policy_entry_id BIGINT NULL,
-        agent_id BIGINT NOT NULL,
+        agent_id BIGINT NULL,
         customer_id BIGINT NULL,
         file_path VARCHAR(255) NOT NULL,
         raw_text LONGTEXT NULL,
@@ -864,7 +864,7 @@ function setupSchema($conn)
         processing_time_ms INT NULL,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE SET NULL,
         INDEX idx_pe_agent (agent_id),
         INDEX idx_pe_status (scanning_status),
         INDEX idx_pe_policy (policy_entry_id)
@@ -874,7 +874,7 @@ function setupSchema($conn)
     createTable($conn, 'reminder_schedules', "CREATE TABLE IF NOT EXISTS reminder_schedules (
         id BIGINT AUTO_INCREMENT PRIMARY KEY,
         policy_entry_id BIGINT NOT NULL,
-        agent_id BIGINT NOT NULL,
+        agent_id BIGINT NULL,
         customer_id BIGINT NOT NULL,
         reminder_stage ENUM('30_days','14_days','7_days','2_days','expiry_day','post_expiry') NOT NULL,
         scheduled_date DATE NOT NULL,
@@ -885,7 +885,7 @@ function setupSchema($conn)
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         FOREIGN KEY (policy_entry_id) REFERENCES policy_entries(id) ON DELETE CASCADE,
-        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE SET NULL,
         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
         INDEX idx_rs_status_date (status, scheduled_date),
         INDEX idx_rs_policy (policy_entry_id),
@@ -909,7 +909,7 @@ function setupSchema($conn)
         error_message TEXT NULL,
         sent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
+        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE SET NULL,
         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE CASCADE,
         INDEX idx_nl_agent (agent_id),
         INDEX idx_nl_status (status),
@@ -921,7 +921,7 @@ function setupSchema($conn)
         id BIGINT AUTO_INCREMENT PRIMARY KEY,
         policy_entry_id BIGINT NULL,
         customer_id BIGINT NOT NULL,
-        agent_id BIGINT NOT NULL,
+        agent_id BIGINT NULL,
         followup_stage ENUM('new_renewal','contacted','interested','quote_sent','negotiation','renewed','lost') NOT NULL DEFAULT 'new_renewal',
         call_notes TEXT NULL,
         next_followup_date DATE NULL,
@@ -1192,6 +1192,11 @@ function setupColumnFixups($conn)
 
     // Update users role enum to include customer
     @$conn->query("ALTER TABLE users MODIFY COLUMN role ENUM('admin','manager','agent','customer') NOT NULL DEFAULT 'agent'");
+
+    // Allow in-house / staff policies without required agent_id
+    @$conn->query("ALTER TABLE policy_extractions MODIFY COLUMN agent_id BIGINT NULL");
+    @$conn->query("ALTER TABLE reminder_schedules MODIFY COLUMN agent_id BIGINT NULL");
+    @$conn->query("ALTER TABLE customer_followups MODIFY COLUMN agent_id BIGINT NULL");
 
     // Make vehicle fields nullable for non-motor policies
     @$conn->query("ALTER TABLE policy_entries MODIFY COLUMN vehicle_id BIGINT NULL");

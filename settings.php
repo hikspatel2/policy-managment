@@ -55,7 +55,11 @@ if (isset($_POST['action'])) {
                     'site_logo' => $siteLogo,
                     'currency_symbol' => $currencySymbol,
                     'site_footer' => $siteFooter,
-                    'points_to_rupees_ratio' => $pointsRatio
+                    'points_to_rupees_ratio' => $pointsRatio,
+                    'ai_provider' => getSetting('ai_provider', 'gemini'),
+                    'gemini_api_key' => getSetting('gemini_api_key', ''),
+                    'claude_api_key' => getSetting('claude_api_key', ''),
+                    'ai_model' => getSetting('ai_model', 'gemini-1.5-flash')
                 ] + array_map(fn($v) => (string)$v, getSettings(['smtp_enabled', 'smtp_host', 'smtp_port', 'smtp_encryption', 'smtp_username', 'smtp_from_email', 'smtp_from_name', 'site_url',
                         'wa_country_code', 'wa_renewal_template', 'wa_due_template', 'auto_backup', 'last_backup_at', 'daily_jobs_date']))
                   + ['smtp_password_set' => getSetting('smtp_password', '') !== '' ? '1' : '0', 'wa_renewal_default' => waDefaultText('renewal'), 'wa_due_default' => waDefaultText('due')]
@@ -110,6 +114,10 @@ if (isset($_POST['action'])) {
             setSetting('wa_country_code', $cc ?: '91');
             setSetting('smtp_enabled', $p('smtp_enabled') === '1' ? '1' : '0');
             setSetting('auto_backup', $p('auto_backup') === '1' ? '1' : '0');
+            if (isset($_POST['ai_provider'])) setSetting('ai_provider', $p('ai_provider') ?: 'gemini');
+            if (isset($_POST['gemini_api_key'])) setSetting('gemini_api_key', $p('gemini_api_key'));
+            if (isset($_POST['claude_api_key'])) setSetting('claude_api_key', $p('claude_api_key'));
+            if (isset($_POST['ai_model'])) setSetting('ai_model', $p('ai_model') ?: 'gemini-1.5-flash');
             if ($p('smtp_password') !== '') setSetting('smtp_password', (string)$_POST['smtp_password']); // blank = keep the saved one
 
             if ($result) {
@@ -544,6 +552,51 @@ if (isset($_POST['action'])) {
                         </div>
                     </div>
 
+                                        <!-- Card: AI Document Scanner -->
+                    <div class="settings-mega-card">
+                        <div class="settings-card-header">
+                            <div class="settings-card-icon" style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);">
+                                <i class="fas fa-robot"></i>
+                            </div>
+                            <div>
+                                <h3 class="settings-card-title">AI Policy Scanner</h3>
+                                <p class="settings-card-subtitle">Google Gemini & Claude multimodal document analysis</p>
+                            </div>
+                        </div>
+                        <div class="settings-card-body">
+                            <div class="form-group" style="margin-bottom: 15px;">
+                                <label for="aiProvider" style="font-weight: 600; font-size: 13px;">AI Provider</label>
+                                <select id="aiProvider" class="form-control" style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px;">
+                                    <option value="gemini">Google Gemini (Recommended - Free Tier Available)</option>
+                                    <option value="claude">Anthropic Claude</option>
+                                    <option value="offline">Built-in Offline Heuristic Scanner (No API Key)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 15px;">
+                                <label for="geminiApiKey" style="font-weight: 600; font-size: 13px;">Google Gemini API Key</label>
+                                <input type="password" id="geminiApiKey" class="form-control" placeholder="AIzaSy..." style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px;">
+                                <small class="text-muted" style="font-size: 11.5px; display: block; margin-top: 4px;">
+                                    Get your API key at <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color: #0284c7;">Google AI Studio</a>. Supports PDF, JPG & PNG scanning.
+                                </small>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 15px;">
+                                <label for="aiModel" style="font-weight: 600; font-size: 13px;">Gemini Model</label>
+                                <select id="aiModel" class="form-control" style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px;">
+                                    <option value="gemini-1.5-flash">Gemini 1.5 Flash (Fast & Accurate)</option>
+                                    <option value="gemini-2.0-flash">Gemini 2.0 Flash (Next-Gen High Speed)</option>
+                                    <option value="gemini-1.5-pro">Gemini 1.5 Pro (Deep Document Reasoning)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-group" style="margin-bottom: 5px;">
+                                <label for="claudeApiKey" style="font-weight: 600; font-size: 13px;">Claude API Key (Optional)</label>
+                                <input type="password" id="claudeApiKey" class="form-control" placeholder="sk-ant-..." style="width: 100%; padding: 8px 12px; border: 1px solid #cbd5e1; border-radius: 6px;">
+                            </div>
+                        </div>
+                    </div>
+
                     <!-- Card 2: User Management -->
                     <div class="settings-mega-card">
                         <div class="settings-card-header">
@@ -752,6 +805,10 @@ if (isset($_POST['action'])) {
                         $('#waDue').val(data.wa_due_template).attr('placeholder', data.wa_due_default);
                         document.getElementById('autoBackup').checked = data.auto_backup !== '0';
                         $('#djLast').text(data.daily_jobs_date ? 'Last ran ' + data.daily_jobs_date + ' · expiry alerts, expired status, weekly backup' : 'Expiry alerts, expired status, weekly backup');
+                        $('#aiProvider').val(data.ai_provider || 'gemini');
+                        $('#geminiApiKey').val(data.gemini_api_key || '');
+                        $('#claudeApiKey').val(data.claude_api_key || '');
+                        $('#aiModel').val(data.ai_model || 'gemini-1.5-flash');
                         loadBackups();
                         var logoSrc = data.site_logo || '';
                         document.getElementById('logoPreview').src = logoSrc;
@@ -799,7 +856,11 @@ if (isset($_POST['action'])) {
                     smtp_username: $('#smtpUser').val(), smtp_password: $('#smtpPass').val(), smtp_from_email: $('#smtpFrom').val(),
                     smtp_from_name: $('#smtpFromName').val(), site_url: $('#siteUrl').val(),
                     wa_country_code: $('#waCc').val(), wa_renewal_template: $('#waRenewal').val(), wa_due_template: $('#waDue').val(),
-                    auto_backup: document.getElementById('autoBackup').checked ? '1' : '0'
+                    auto_backup: document.getElementById('autoBackup').checked ? '1' : '0',
+                    ai_provider: $('#aiProvider').val(),
+                    gemini_api_key: $('#geminiApiKey').val(),
+                    claude_api_key: $('#claudeApiKey').val(),
+                    ai_model: $('#aiModel').val()
                 },
                 dataType: 'json',
                 success: function(response) {

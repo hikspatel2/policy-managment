@@ -29,7 +29,7 @@ if (!$r) {
 
 if ($role === 'agent') {
     $aid = agentIdForUser($conn, $userId);
-    if ((int)$r['agent_id'] !== $aid) {
+    if (!empty($r['agent_id']) && (int)$r['agent_id'] !== $aid) {
         http_response_code(403);
         exit('Access denied to this document');
     }

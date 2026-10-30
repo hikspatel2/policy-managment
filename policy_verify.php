@@ -22,9 +22,9 @@ $extId = (int)($_GET['ext_id'] ?? 0);
 $category = trim($_GET['category'] ?? 'motor');
 
 // Fetch extraction record
-$eStmt = $conn->prepare("SELECT pe.*, c.name AS cust_name, c.mobile AS cust_mobile, c.email AS cust_email
-                         FROM policy_extractions pe
-                         LEFT JOIN customers c ON c.id = pe.customer_id
+$eStmt = $conn->prepare("SELECT pe.*, c.name AS cust_name, c.mobile AS cust_mobile, c.email AS cust_email 
+                         FROM policy_extractions pe 
+                         LEFT JOIN customers c ON c.id = pe.customer_id 
                          WHERE pe.id = ? LIMIT 1");
 $eStmt->bind_param("i", $extId);
 $eStmt->execute();
@@ -35,7 +35,7 @@ if (!$ext) {
     die("Extraction record #{$extId} not found.");
 }
 
-if ($role === 'agent' && (int)$ext['agent_id'] !== $aid) {
+if ($role === 'agent' && !empty($ext['agent_id']) && (int)$ext['agent_id'] !== $aid) {
     die("Unauthorized access to document verification.");
 }
 
@@ -56,151 +56,175 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!isset($_POST['csrf_token']) || !validateCSRFToken($_POST['csrf_token'])) {
         $error = 'Invalid security token. Please try again.';
     } else {
-        $policyNumber = trim($_POST['policy_number'] ?? '');
-        $companyName = trim($_POST['company_name'] ?? '');
-        $companyCode = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $companyName), 0, 10)) ?: 'INS';
-        $customerId = (int)($_POST['customer_id'] ?? $ext['customer_id']);
-        $custName = trim($_POST['customer_name'] ?? $ext['cust_name']);
-        $startDate = trim($_POST['policy_start_date'] ?? date('Y-m-d'));
-        $endDate = trim($_POST['policy_end_date'] ?? date('Y-m-d', strtotime('+1 year')));
-        $entryDate = date('Y-m-d');
-        $totalPremium = (float)($_POST['total_premium_amount'] ?? 0);
-        $netPremium = (float)($_POST['net_premium_amount'] ?? $totalPremium);
-        $gstAmount = (float)($_POST['gst_amount'] ?? 0);
-        $policyType = trim($_POST['policy_type'] ?? 'comprehensive');
-        $businessType = trim($_POST['business_type'] ?? 'new');
-        $insuranceCat = trim($_POST['insurance_category'] ?? $category);
+        try {
+            $policyNumber = trim($_POST['policy_number'] ?? '');
+            $companyName = trim($_POST['company_name'] ?? '');
+            $companyCode = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $companyName), 0, 10)) ?: 'INS';
+            $customerId = (int)($_POST['customer_id'] ?? $ext['customer_id']);
+            $custName = trim($_POST['customer_name'] ?? ($ext['cust_name'] ?? 'Customer'));
+            $startDate = trim($_POST['policy_start_date'] ?? date('Y-m-d'));
+            $endDate = trim($_POST['policy_end_date'] ?? date('Y-m-d', strtotime('+1 year')));
+            $entryDate = date('Y-m-d');
+            $totalPremium = (float)($_POST['total_premium_amount'] ?? 0);
+            $netPremium = (float)($_POST['net_premium_amount'] ?? $totalPremium);
+            $gstAmount = (float)($_POST['gst_amount'] ?? 0);
+            $policyType = trim($_POST['policy_type'] ?? 'comprehensive');
+            $businessType = trim($_POST['business_type'] ?? 'new');
+            $insuranceCat = trim($_POST['insurance_category'] ?? $category);
 
-        // Vertical specific
-        $vehicleNumber = trim($_POST['vehicle_number'] ?? '');
-        $make = trim($_POST['make'] ?? '');
-        $model = trim($_POST['model'] ?? '');
-        $idv = !empty($_POST['idv']) ? (float)$_POST['idv'] : null;
-        $ncbPercent = !empty($_POST['ncb_percent']) ? (float)$_POST['ncb_percent'] : 0.00;
+            // Vertical specific
+            $vehicleNumber = trim($_POST['vehicle_number'] ?? '');
+            $make = trim($_POST['make'] ?? '');
+            $model = trim($_POST['model'] ?? '');
+            $idv = !empty($_POST['idv']) ? (float)$_POST['idv'] : 0.00;
+            $ncbPercent = !empty($_POST['ncb_percent']) ? (float)$_POST['ncb_percent'] : 0.00;
 
-        $sumInsured = !empty($_POST['sum_insured']) ? (float)$_POST['sum_insured'] : null;
-        $planName = trim($_POST['plan_name'] ?? '');
-        $tpaName = trim($_POST['tpa_name'] ?? '');
-        $membersCount = (int)($_POST['members_count'] ?? 1);
-        $membersDetails = trim($_POST['members_details'] ?? '');
-        $nomineeName = trim($_POST['nominee_name'] ?? '');
-        $nomineeRelation = trim($_POST['nominee_relation'] ?? '');
+            $sumInsured = !empty($_POST['sum_insured']) ? (float)$_POST['sum_insured'] : 0.00;
+            $planName = trim($_POST['plan_name'] ?? '');
+            $tpaName = trim($_POST['tpa_name'] ?? '');
+            $membersCount = (int)($_POST['members_count'] ?? 1);
+            $membersDetails = trim($_POST['members_details'] ?? '');
+            $nomineeName = trim($_POST['nominee_name'] ?? '');
+            $nomineeRelation = trim($_POST['nominee_relation'] ?? '');
 
-        // Validation
-        if (empty($policyNumber)) {
-            $error = 'Policy Number is required.';
-        } elseif (empty($companyName)) {
-            $error = 'Insurance Company Name is required.';
-        } elseif (empty($customerId)) {
-            $error = 'Customer assignment is required.';
-        } elseif ($totalPremium <= 0) {
-            $error = 'Total Premium Amount must be greater than zero.';
-        } else {
-            // Check if policy number already exists in system
-            $chkPol = $conn->prepare("SELECT id FROM policy_entries WHERE policy_number = ? AND deleted_at IS NULL LIMIT 1");
-            $chkPol->bind_param("s", $policyNumber);
-            $chkPol->execute();
-            if ($chkPol->get_result()->num_rows > 0) {
-                $error = "A policy with Policy Number '{$policyNumber}' is already registered in the system.";
-            }
-            $chkPol->close();
+            // Validation
+            if (empty($policyNumber)) {
+                $error = 'Policy Number is required.';
+            } elseif (empty($companyName)) {
+                $error = 'Insurance Company Name is required.';
+            } elseif (empty($customerId)) {
+                $error = 'Customer assignment is required.';
+            } elseif ($totalPremium <= 0) {
+                $error = 'Total Premium Amount must be greater than zero.';
+            } else {
+                // Check if policy number already exists in system
+                $chkPol = $conn->prepare("SELECT id FROM policy_entries WHERE policy_number = ? AND deleted_at IS NULL LIMIT 1");
+                $chkPol->bind_param("s", $policyNumber);
+                $chkPol->execute();
+                if ($chkPol->get_result()->num_rows > 0) {
+                    $error = "A policy with Policy Number '{$policyNumber}' is already registered in the system.";
+                }
+                $chkPol->close();
 
-            if (!$error) {
-                // If motor insurance and vehicle number provided, create or find vehicle record
-                $vehicleId = null;
-                if ($insuranceCat === 'motor' && !empty($vehicleNumber)) {
-                    $vClean = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $vehicleNumber));
-                    $vChk = $conn->prepare("SELECT id FROM vehicles WHERE REPLACE(vehicle_number, ' ', '') = ? LIMIT 1");
-                    $vChk->bind_param("s", $vClean);
-                    $vChk->execute();
-                    $vRow = $vChk->get_result()->fetch_assoc();
-                    $vChk->close();
+                if (!$error) {
+                    // If motor insurance and vehicle number provided, create or find vehicle record
+                    $vehicleId = null;
+                    if ($insuranceCat === 'motor' && !empty($vehicleNumber)) {
+                        $vClean = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', $vehicleNumber));
+                        $vChk = $conn->prepare("SELECT id FROM vehicles WHERE REPLACE(vehicle_number, ' ', '') = ? LIMIT 1");
+                        $vChk->bind_param("s", $vClean);
+                        $vChk->execute();
+                        $vRow = $vChk->get_result()->fetch_assoc();
+                        $vChk->close();
 
-                    if ($vRow) {
-                        $vehicleId = (int)$vRow['id'];
-                    } else {
-                        $vIns = $conn->prepare("INSERT INTO vehicles (vehicle_number, customer_id, make, model, is_active) VALUES (?, ?, ?, ?, 1)");
-                        $vIns->bind_param("siss", $vehicleNumber, $customerId, $make, $model);
-                        $vIns->execute();
-                        $vehicleId = $conn->insert_id;
-                        $vIns->close();
+                        if ($vRow) {
+                            $vehicleId = (int)$vRow['id'];
+                        } else {
+                            $vIns = $conn->prepare("INSERT INTO vehicles (vehicle_number, customer_id, make, model, is_active) VALUES (?, ?, ?, ?, 1)");
+                            $vIns->bind_param("siss", $vehicleNumber, $customerId, $make, $model);
+                            $vIns->execute();
+                            $vehicleId = $conn->insert_id;
+                            $vIns->close();
+                        }
                     }
+
+                    // Default branch & buyer
+                    $branchId = 1;
+                    $buyerId = null;
+
+                    // Fetch first active buyer if exists
+                    $bRes = $conn->query("SELECT id FROM buyers WHERE is_active = 1 LIMIT 1");
+                    if ($bRes && $bRow = $bRes->fetch_assoc()) {
+                        $buyerId = (int)$bRow['id'];
+                    }
+
+                    // Insert into policy_entries
+                    $insSql = "INSERT INTO policy_entries (
+                        insurance_category, entry_date, branch_id, vehicle_id, vehicle_number, vehicle_type,
+                        customer_id, customer_name, agent_id, agent_name, buyer_id, company_name, company_code,
+                        policy_number, policy_type, business_type, total_premium_amount, net_premium_amount, gst_amount,
+                        idv, ncb_percent, sum_insured, plan_name, tpa_name, members_count, members_details,
+                        nominee_name, nominee_relation, policy_start_date, policy_end_date, status,
+                        renewal_status, verification_status, verified_by, verified_at, created_by
+                    ) VALUES (
+                        ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, 'active',
+                        'original', 'verified', ?, NOW(), ?
+                    )";
+
+                    $agentName = $_SESSION['username'] ?? 'Staff';
+                    $vehicleType = ($insuranceCat === 'motor') ? 'Motor' : null;
+                    $aidParam = ($aid > 0) ? $aid : (!empty($ext['agent_id']) ? (int)$ext['agent_id'] : null);
+
+                    $insStmt = $conn->prepare($insSql);
+                    // 32 placeholders match exactly 32 types: "ssiisssssisssssddddddsssisssssii" (6 'd's for premium/insured amounts)
+                    $insStmt->bind_param(
+                        "ssiisssssisssssddddddsssisssssii",
+                        $insuranceCat, $entryDate, $branchId, $vehicleId, $vehicleNumber, $vehicleType,
+                        $customerId, $custName, $aidParam, $agentName, $buyerId, $companyName, $companyCode,
+                        $policyNumber, $policyType, $businessType, $totalPremium, $netPremium, $gstAmount,
+                        $idv, $ncbPercent, $sumInsured, $planName, $tpaName, $membersCount, $membersDetails,
+                        $nomineeName, $nomineeRelation, $startDate, $endDate, $userId, $userId
+                    );
+                    $insStmt->execute();
+                    $newPolicyId = $conn->insert_id;
+                    $insStmt->close();
+
+                    // Insert into policy_documents
+                    $docName = basename($ext['file_path']);
+                    $docSql = $conn->prepare("INSERT INTO policy_documents (policy_entry_id, document_type, file_name, file_path, uploaded_by) VALUES (?, 'policy_pdf', ?, ?, ?)");
+                    $docSql->bind_param("issi", $newPolicyId, $docName, $ext['file_path'], $userId);
+                    $docSql->execute();
+                    $docSql->close();
+
+                    // Update extraction record
+                    $conn->query("UPDATE policy_extractions SET policy_entry_id = $newPolicyId, scanning_status = 'completed' WHERE id = $extId");
+
+                    // Automatically schedule the 5-Stage Expiry Reminders
+                    schedulePolicyReminders($conn, $newPolicyId, $aidParam, $customerId, $endDate);
+
+                    // Initialize Customer Followup in Renewal CRM Pipeline
+                    $fuDate = date('Y-m-d', strtotime('-30 days', strtotime($endDate)));
+                    if ($aidParam) {
+                        $fuStmt = $conn->prepare("INSERT INTO customer_followups (policy_entry_id, customer_id, agent_id, followup_stage, next_followup_date, call_notes) VALUES (?, ?, ?, 'new_renewal', ?, 'Policy verified and scheduled for renewal follow-up')");
+                        $fuStmt->bind_param("iiis", $newPolicyId, $customerId, $aidParam, $fuDate);
+                    } else {
+                        $fuStmt = $conn->prepare("INSERT INTO customer_followups (policy_entry_id, customer_id, agent_id, followup_stage, next_followup_date, call_notes) VALUES (?, ?, NULL, 'new_renewal', ?, 'Policy verified and scheduled for renewal follow-up')");
+                        $fuStmt->bind_param("iis", $newPolicyId, $customerId, $fuDate);
+                    }
+                    if ($fuStmt) {
+                        $fuStmt->execute();
+                        $fuStmt->close();
+                    }
+
+                    // Increment agent subscription policy count if an agent is attached
+                    if ($aidParam) {
+                        $conn->query("UPDATE subscriptions SET policy_count = policy_count + 1 WHERE agent_id = $aidParam AND status = 'active' ORDER BY id DESC LIMIT 1");
+                    }
+
+                    logActivity($userId, $agentName, 'Policy Verified', "Verified policy #{$policyNumber} for customer #{$customerId}");
+
+                    $conn->close();
+
+                    header("Location: policy_entries.php?msg=verified&pid=" . $newPolicyId);
+                    exit();
                 }
-
-                // Default branch (1) or agent branch
-                $branchId = 1;
-                $buyerId = 1; // Default insurance carrier book
-
-                // Insert into policy_entries
-                $insSql = "INSERT INTO policy_entries (
-                    insurance_category, entry_date, branch_id, vehicle_id, vehicle_number, vehicle_type,
-                    customer_id, customer_name, agent_id, agent_name, buyer_id, company_name, company_code,
-                    policy_number, policy_type, business_type, total_premium_amount, net_premium_amount, gst_amount,
-                    idv, ncb_percent, sum_insured, plan_name, tpa_name, members_count, members_details,
-                    nominee_name, nominee_relation, policy_start_date, policy_end_date, status,
-                    renewal_status, verification_status, verified_by, verified_at, created_by
-                ) VALUES (
-                    ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?, 'active',
-                    'original', 'verified', ?, NOW(), ?
-                )";
-
-                $agentName = $_SESSION['username'] ?? 'Agent';
-                $vehicleType = ($insuranceCat === 'motor') ? 'Car' : null;
-
-                $insStmt = $conn->prepare($insSql);
-                $insStmt->bind_param(
-                    "ssiisssssisssssdddddsssisssssii",
-                    $insuranceCat, $entryDate, $branchId, $vehicleId, $vehicleNumber, $vehicleType,
-                    $customerId, $custName, $aid, $agentName, $buyerId, $companyName, $companyCode,
-                    $policyNumber, $policyType, $businessType, $totalPremium, $netPremium, $gstAmount,
-                    $idv, $ncbPercent, $sumInsured, $planName, $tpaName, $membersCount, $membersDetails,
-                    $nomineeName, $nomineeRelation, $startDate, $endDate, $userId, $userId
-                );
-                $insStmt->execute();
-                $newPolicyId = $conn->insert_id;
-                $insStmt->close();
-
-                // Insert into policy_documents
-                $docName = basename($ext['file_path']);
-                $docSql = $conn->prepare("INSERT INTO policy_documents (policy_entry_id, document_type, file_name, file_path, uploaded_by) VALUES (?, 'policy_pdf', ?, ?, ?)");
-                $docSql->bind_param("issi", $newPolicyId, $docName, $ext['file_path'], $userId);
-                $docSql->execute();
-                $docSql->close();
-
-                // Update extraction record
-                $conn->query("UPDATE policy_extractions SET policy_entry_id = $newPolicyId, scanning_status = 'completed' WHERE id = $extId");
-
-                // Automatically schedule the 5-Stage Expiry Reminders
-                schedulePolicyReminders($conn, $newPolicyId, $aid, $customerId, $endDate);
-
-                // Initialize Customer Followup in Renewal CRM Pipeline
-                $fuDate = date('Y-m-d', strtotime('-30 days', strtotime($endDate)));
-                $fuStmt = $conn->prepare("INSERT INTO customer_followups (policy_entry_id, customer_id, agent_id, followup_stage, next_followup_date, call_notes) VALUES (?, ?, ?, 'new_renewal', ?, 'Policy verified and scheduled for renewal follow-up')");
-                $fuStmt->bind_param("iiis", $newPolicyId, $customerId, $aid, $fuDate);
-                $fuStmt->execute();
-                $fuStmt->close();
-
-                // Increment agent subscription policy count
-                if ($aid > 0) {
-                    $conn->query("UPDATE subscriptions SET policy_count = policy_count + 1 WHERE agent_id = $aid AND status = 'active' ORDER BY id DESC LIMIT 1");
-                }
-
-                logActivity($userId, $agentName, 'Policy Verified', "Verified policy #{$policyNumber} for customer #{$customerId}");
-
-                $conn->close();
-
-                header("Location: policy_entries.php?msg=verified&pid=" . $newPolicyId);
-                exit();
             }
+        } catch (Throwable $e) {
+            error_log("Policy verification error: " . $e->getMessage());
+            $error = "Failed to save verified policy: " . $e->getMessage();
         }
     }
 }
 
 $csrf_token = generateCSRFToken();
+
+// Determine file type for preview pane
+$fileExt = strtolower(pathinfo($ext['file_path'], PATHINFO_EXTENSION));
+$isImage = in_array($fileExt, ['jpg', 'jpeg', 'png', 'webp', 'gif'], true);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -233,6 +257,7 @@ $csrf_token = generateCSRFToken();
             position: relative;
             display: flex;
             flex-direction: column;
+            overflow: auto;
         }
         .doc-preview-frame {
             width: 100%;
@@ -285,7 +310,7 @@ $csrf_token = generateCSRFToken();
             <strong style="font-size: 16px;"><i class="fas fa-microscope" style="color: #38bdf8;"></i> AI Policy Verification Workbench</strong>
         </div>
         <div style="display: flex; align-items: center; gap: 12px;">
-            <a href="ai_scanner.php?ext_id=<?php echo $extId; ?>&category=<?php echo urlencode($category); ?>" class="btn btn-secondary" style="padding: 6px 14px; font-size: 13px; border-radius: 6px; text-decoration: none;">
+            <a href="ai_scanner.php?ext_id=<?php echo $extId; ?>&category=<?php echo urlencode($category); ?>&auto=1" class="btn btn-secondary" style="padding: 6px 14px; font-size: 13px; border-radius: 6px; text-decoration: none;">
                 <i class="fas fa-rotate"></i> Re-Scan with AI
             </a>
             <button type="submit" form="verifyForm" class="btn btn-primary" style="padding: 7px 18px; font-size: 13.5px; font-weight: 600; border-radius: 6px; background: #10b981; border-color: #059669;">
@@ -297,7 +322,13 @@ $csrf_token = generateCSRFToken();
     <div class="workbench-layout">
         <!-- LEFT PANE: Document Preview -->
         <div class="doc-preview-pane">
-            <iframe src="stream_doc.php?ext_id=<?php echo $extId; ?>#toolbar=1&navpanes=0" class="doc-preview-frame"></iframe>
+            <?php if ($isImage): ?>
+                <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; padding: 20px; box-sizing: border-box;">
+                    <img src="stream_doc.php?ext_id=<?php echo $extId; ?>" alt="Policy Document" style="max-width: 100%; max-height: 100%; object-fit: contain; box-shadow: 0 4px 20px rgba(0,0,0,0.5); border-radius: 8px;">
+                </div>
+            <?php else: ?>
+                <iframe src="stream_doc.php?ext_id=<?php echo $extId; ?>#toolbar=1&navpanes=0" class="doc-preview-frame"></iframe>
+            <?php endif; ?>
         </div>
 
         <!-- RIGHT PANE: Extracted Data Review Form -->
@@ -307,7 +338,7 @@ $csrf_token = generateCSRFToken();
                     <i class="fas fa-clipboard-check" style="color: #0074D9;"></i> Extracted Data Review
                 </h3>
                 <p style="margin: 0; font-size: 13px; color: #64748b;">
-                    Compare extracted values against the document on the left. Edit any values before finalizing.
+                    Compare extracted values against the original document on the left. Edit or fill any values before finalizing.
                 </p>
             </div>
 
@@ -316,7 +347,7 @@ $csrf_token = generateCSRFToken();
             <?php endif; ?>
 
             <?php if (isset($_GET['scan_success'])): ?>
-                <div class="success" style="margin-bottom: 15px;"><i class="fas fa-check-circle"></i> AI extraction completed successfully! Please verify fields below.</div>
+                <div class="success" style="margin-bottom: 15px;"><i class="fas fa-check-circle"></i> AI extraction completed! Review and verify details below.</div>
             <?php elseif (isset($_GET['scan_error'])): ?>
                 <div class="warning" style="margin-bottom: 15px; background: #fffbeb; border: 1px solid #fef3c7; color: #92400e; padding: 10px; border-radius: 6px;">
                     <i class="fas fa-info-circle"></i> Manual review mode: <?php echo htmlspecialchars($_GET['scan_error']); ?>
@@ -333,7 +364,7 @@ $csrf_token = generateCSRFToken();
                 <div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 12px; margin-bottom: 18px;">
                     <div style="font-size: 12px; font-weight: 700; color: #64748b; text-transform: uppercase;">Customer Assigned</div>
                     <div style="font-size: 15px; font-weight: 700; color: #0f172a; margin-top: 2px;">
-                        <?php echo htmlspecialchars($ext['cust_name'] ?? 'Unnamed Customer'); ?>
+                        <?php echo htmlspecialchars($ext['cust_name'] ?? 'Customer'); ?>
                     </div>
                     <div style="font-size: 13px; color: #64748b;">
                         Mobile: <?php echo htmlspecialchars($ext['cust_mobile'] ?? 'N/A'); ?> | Email: <?php echo htmlspecialchars($ext['cust_email'] ?? 'N/A'); ?>
@@ -351,7 +382,7 @@ $csrf_token = generateCSRFToken();
                                 </span>
                             <?php endif; ?>
                         </div>
-                        <input type="text" id="company_name" name="company_name" required value="<?php echo htmlspecialchars($extracted['insurance_company'] ?? ''); ?>" placeholder="e.g. ICICI Lombard">
+                        <input type="text" id="company_name" name="company_name" required value="<?php echo htmlspecialchars($extracted['insurance_company'] ?? ''); ?>" placeholder="e.g. HDFC ERGO / ICICI Lombard">
                     </div>
 
                     <div class="form-group">
@@ -363,7 +394,7 @@ $csrf_token = generateCSRFToken();
                                 </span>
                             <?php endif; ?>
                         </div>
-                        <input type="text" id="policy_number" name="policy_number" required value="<?php echo htmlspecialchars($extracted['policy_number'] ?? ''); ?>" placeholder="e.g. 3001/2025/12345">
+                        <input type="text" id="policy_number" name="policy_number" required value="<?php echo htmlspecialchars($extracted['policy_number'] ?? ''); ?>" placeholder="e.g. 2312/1234567/00/000">
                     </div>
                 </div>
 
@@ -408,6 +439,11 @@ $csrf_token = generateCSRFToken();
                     <div class="form-group">
                         <div class="field-label-row">
                             <label for="total_premium_amount">Total Premium *</label>
+                            <?php if (isset($confidence['total_premium'])): ?>
+                                <span class="conf-badge <?php echo $confidence['total_premium'] > 0.7 ? 'high' : 'med'; ?>">
+                                    <i class="fas fa-check"></i> <?php echo round($confidence['total_premium'] * 100); ?>%
+                                </span>
+                            <?php endif; ?>
                         </div>
                         <input type="number" step="0.01" id="total_premium_amount" name="total_premium_amount" required value="<?php echo htmlspecialchars($extracted['total_premium'] ?? '0.00'); ?>" style="font-weight: 700; color: #001f3f;">
                     </div>
@@ -427,20 +463,20 @@ $csrf_token = generateCSRFToken();
                             <div class="form-group">
                                 <label style="font-size: 12.5px;">Policy Cover Type</label>
                                 <select name="policy_type">
-                                    <option value="comprehensive" <?php echo (($extracted['policy_type'] ?? '') === 'Comprehensive') ? 'selected' : ''; ?>>Comprehensive</option>
-                                    <option value="third_party" <?php echo (($extracted['policy_type'] ?? '') === 'Third Party') ? 'selected' : ''; ?>>Third Party Only</option>
-                                    <option value="own_damage" <?php echo (($extracted['policy_type'] ?? '') === 'Own Damage') ? 'selected' : ''; ?>>Own Damage</option>
+                                    <option value="comprehensive" <?php echo strtolower($extracted['policy_type'] ?? '') === 'comprehensive' ? 'selected' : ''; ?>>Comprehensive</option>
+                                    <option value="third_party" <?php echo strtolower($extracted['policy_type'] ?? '') === 'third party' ? 'selected' : ''; ?>>Third Party Only</option>
+                                    <option value="own_damage" <?php echo strtolower($extracted['policy_type'] ?? '') === 'own damage' ? 'selected' : ''; ?>>Own Damage</option>
                                 </select>
                             </div>
                         </div>
                         <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px;">
                             <div class="form-group">
                                 <label style="font-size: 12.5px;">Make</label>
-                                <input type="text" name="make" placeholder="e.g. Maruti" value="<?php echo htmlspecialchars($extracted['make'] ?? ''); ?>">
+                                <input type="text" name="make" placeholder="e.g. Maruti / Hyundai" value="<?php echo htmlspecialchars($extracted['make'] ?? ''); ?>">
                             </div>
                             <div class="form-group">
                                 <label style="font-size: 12.5px;">Model</label>
-                                <input type="text" name="model" placeholder="e.g. Swift" value="<?php echo htmlspecialchars($extracted['model'] ?? ''); ?>">
+                                <input type="text" name="model" placeholder="e.g. Swift / Creta" value="<?php echo htmlspecialchars($extracted['model'] ?? ''); ?>">
                             </div>
                             <div class="form-group">
                                 <label style="font-size: 12.5px;">IDV (Insured Value)</label>
@@ -487,7 +523,7 @@ $csrf_token = generateCSRFToken();
                     </div>
                     <div class="form-group">
                         <label for="nominee_relation" style="font-size: 13px;">Nominee Relationship</label>
-                        <input type="text" id="nominee_relation" name="nominee_relation" placeholder="e.g. Spouse / Son" value="<?php echo htmlspecialchars($extracted['nominee_relation'] ?? ''); ?>">
+                        <input type="text" id="nominee_relation" name="nominee_relation" placeholder="e.g. Spouse / Son / Father" value="<?php echo htmlspecialchars($extracted['nominee_relation'] ?? ''); ?>">
                     </div>
                 </div>
 
