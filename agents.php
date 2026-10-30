@@ -271,8 +271,19 @@ if (isset($_GET['action'])) {
                     exit();
                 }
                 if (empty($agentCode)) {
-                    echo json_encode(['success' => false, 'message' => 'Agent code is required']);
-                    exit();
+                    // Auto-generate sequential unique agent code, e.g. AGT-0001
+                    $maxRes = $conn->query("SELECT MAX(id) FROM agents");
+                    $nextNum = ($maxRes && ($row = $maxRes->fetch_row())) ? ((int)$row[0] + 1) : 1;
+                    $agentCode = 'AGT-' . str_pad($nextNum, 4, '0', STR_PAD_LEFT);
+                    $chk = $conn->prepare("SELECT id FROM agents WHERE agent_code = ?");
+                    while (true) {
+                        $chk->bind_param("s", $agentCode);
+                        $chk->execute();
+                        if ($chk->get_result()->num_rows === 0) break;
+                        $nextNum++;
+                        $agentCode = 'AGT-' . str_pad($nextNum, 4, '0', STR_PAD_LEFT);
+                    }
+                    $chk->close();
                 }
                 // agent owns a login account — email + pwd (auto-generated if blank)
                 if (!empty($email) && !filter_var($email, FILTER_VALIDATE_EMAIL)) {
@@ -571,6 +582,18 @@ if (isset($_GET['action'])) {
                     echo json_encode(['success' => false, 'message' => 'Invalid agent ID']);
                     exit();
                 }
+
+                $currStmt = $conn->prepare("SELECT * FROM agents WHERE id = ?");
+                $currStmt->bind_param("i", $aid);
+                $currStmt->execute();
+                $curr = $currStmt->get_result()->fetch_assoc();
+                $currStmt->close();
+
+                if (!$curr) {
+                    echo json_encode(['success' => false, 'message' => 'Agent not found']);
+                    exit();
+                }
+
                 if (strlen($name) < 2 || strlen($name) > 150) {
                     echo json_encode(['success' => false, 'message' => 'Name must be 2-150 characters']);
                     exit();
@@ -579,14 +602,23 @@ if (isset($_GET['action'])) {
                     echo json_encode(['success' => false, 'message' => 'Mobile must be 10-15 digits']);
                     exit();
                 }
-                if (empty($agentCode)) {
-                    echo json_encode(['success' => false, 'message' => 'Agent code is required']);
-                    exit();
-                }
+
+                if (empty($agentCode)) $agentCode = $curr['agent_code'];
+                if (!isset($_POST['pan_number'])) $panNumber = $curr['pan_number'] ?? '';
+                if (!isset($_POST['aadhar_number'])) $aadharNumber = $curr['aadhar_number'] ?? '';
+                if (!isset($_POST['bank_name'])) $bankName = $curr['bank_name'] ?? '';
+                if (!isset($_POST['bank_account_no'])) $bankAccountNo = $curr['bank_account_no'] ?? '';
+                if (!isset($_POST['ifsc_code'])) $ifscCode = $curr['ifsc_code'] ?? '';
 
                 $ex = agentExtras($_POST);
                 if (is_string($ex)) { echo json_encode(['success' => false, 'message' => $ex]); exit(); }
                 [$licNo, $licExp, $tdsRate, $joinDate, $upiId] = $ex;
+
+                if (!isset($_POST['license_number'])) $licNo = $curr['license_number'] ?? null;
+                if (!isset($_POST['license_expiry_date'])) $licExp = $curr['license_expiry_date'] ?? null;
+                if (!isset($_POST['tds_rate'])) $tdsRate = (float)($curr['tds_rate'] ?? 5.00);
+                if (!isset($_POST['joining_date'])) $joinDate = $curr['joining_date'] ?? null;
+                if (!isset($_POST['upi_id'])) $upiId = $curr['upi_id'] ?? null;
 
                 // unique agent_code excluding self
                 $stmt = $conn->prepare("SELECT id FROM agents WHERE agent_code = ? AND id != ?");
@@ -885,13 +917,10 @@ if (isset($_GET['action'])) {
             <div class="modal-body">
                 <form id="agentForm">
                     <input type="hidden" id="agentId" name="id">
+                    <input type="hidden" id="agentCode" name="agent_code">
 
                     <div class="form-section-title">Basic Info</div>
                     <div class="form-grid">
-                        <div class="form-group">
-                            <label><i class="fas fa-barcode"></i> Agent Code *</label>
-                            <input type="text" id="agentCode" name="agent_code" required maxlength="30" placeholder="e.g. AGT-0001">
-                        </div>
                         <div class="form-group">
                             <label><i class="fas fa-user"></i> Name *</label>
                             <input type="text" id="agentName" name="name" required minlength="2" maxlength="150" placeholder="Full name">
@@ -929,54 +958,6 @@ if (isset($_GET['action'])) {
                         <div class="form-group">
                             <label><i class="fas fa-map"></i> State</label>
                             <input type="text" id="agentState" name="state" maxlength="100" placeholder="State">
-                        </div>
-                    </div>
-
-                    <div class="form-section-title">Identity</div>
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label><i class="fas fa-id-card"></i> PAN Number</label>
-                            <input type="text" id="agentPan" name="pan_number" maxlength="10" placeholder="ABCDE1234F" class="text-uppercase">
-                        </div>
-                        <div class="form-group">
-                            <label><i class="fas fa-fingerprint"></i> Aadhar Number</label>
-                            <input type="text" id="agentAadhar" name="aadhar_number" maxlength="12" placeholder="12-digit number">
-                        </div>
-                        <div class="form-group">
-                            <label><i class="fas fa-certificate"></i> Licence Number</label>
-                            <input type="text" id="agentLicNo" name="license_number" maxlength="30" placeholder="IRDAI licence no." class="text-uppercase">
-                        </div>
-                        <div class="form-group">
-                            <label><i class="fas fa-calendar-times"></i> Licence Expiry</label>
-                            <input type="date" id="agentLicExp" name="license_expiry_date">
-                        </div>
-                        <div class="form-group">
-                            <label><i class="fas fa-percent"></i> TDS Rate (%)</label>
-                            <input type="number" id="agentTds" name="tds_rate" step="0.01" min="0" max="30" value="5.00" placeholder="5.00">
-                        </div>
-                        <div class="form-group">
-                            <label><i class="fas fa-calendar-check"></i> Joining Date</label>
-                            <input type="date" id="agentJoinDate" name="joining_date">
-                        </div>
-                    </div>
-
-                    <div class="form-section-title">Banking Details</div>
-                    <div class="form-grid">
-                        <div class="form-group">
-                            <label><i class="fas fa-university"></i> Bank Name</label>
-                            <input type="text" id="agentBankName" name="bank_name" maxlength="100" placeholder="Bank name">
-                        </div>
-                        <div class="form-group">
-                            <label><i class="fas fa-credit-card"></i> Account Number</label>
-                            <input type="text" id="agentBankAccNo" name="bank_account_no" maxlength="20" placeholder="Account number">
-                        </div>
-                        <div class="form-group">
-                            <label><i class="fas fa-code-branch"></i> IFSC Code</label>
-                            <input type="text" id="agentIfsc" name="ifsc_code" maxlength="11" placeholder="IFSC code" class="text-uppercase">
-                        </div>
-                        <div class="form-group">
-                            <label><i class="fas fa-qrcode"></i> UPI ID</label>
-                            <input type="text" id="agentUpi" name="upi_id" maxlength="60" pattern="[A-Za-z0-9._\-]+@[A-Za-z][A-Za-z0-9]+" placeholder="name@bank">
                         </div>
                     </div>
 
