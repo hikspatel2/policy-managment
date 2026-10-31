@@ -1204,6 +1204,83 @@ CREATE TABLE `agent_verifications` (
   INDEX `idx_av_token` (`token_or_otp`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ------------------------------------------------------------
+-- Sample Portfolio Data (3 Active Agents, Customers, Vehicles & 10 Realistic Policies)
+-- ------------------------------------------------------------
+INSERT INTO `branches` (`id`, `branch_code`, `name`, `mobile`, `email`, `address`, `city`, `pincode`, `state`, `wallet_balance`, `is_active`) VALUES
+(1, 'BR-01', 'Ahmedabad Main Branch', '9876500001', 'ahmedabad@demo.com', 'Ashram Road', 'Ahmedabad', '380009', 'Gujarat', 0.00, 1),
+(2, 'BR-02', 'Surat Ring Road Branch', '9876500002', 'surat@demo.com', 'Ring Road', 'Surat', '395002', 'Gujarat', 0.00, 1),
+(3, 'BR-03', 'Vadodara Alkapuri Branch', '9876500003', 'baroda@demo.com', 'Alkapuri', 'Vadodara', '390007', 'Gujarat', 0.00, 1)
+ON DUPLICATE KEY UPDATE `name`=VALUES(`name`);
+
+INSERT INTO `users` (`id`, `branch_id`, `name`, `email`, `phone`, `password_hash`, `role`, `is_active`, `status`) VALUES
+(101, 1, 'Rahul Sharma', 'rahul.agent@demo.com', '9876543210', '$2y$10$wT8K8U1Qz/j5p9oW8V.v3OMYfWqB2rK8s7V1f6c7C0hJ4nZ2n4y8K', 'agent', 1, 'active'),
+(102, 2, 'Priya Patel', 'priya.agent@demo.com', '9876543211', '$2y$10$wT8K8U1Qz/j5p9oW8V.v3OMYfWqB2rK8s7V1f6c7C0hJ4nZ2n4y8K', 'agent', 1, 'active'),
+(103, 3, 'Amit Verma', 'amit.agent@demo.com', '9876543212', '$2y$10$wT8K8U1Qz/j5p9oW8V.v3OMYfWqB2rK8s7V1f6c7C0hJ4nZ2n4y8K', 'agent', 1, 'active')
+ON DUPLICATE KEY UPDATE `role`='agent', `status`='active', `is_active`=1;
+
+INSERT INTO `agents` (`id`, `user_id`, `branch_id`, `agent_code`, `name`, `agency_name`, `mobile`, `email`, `city`, `pincode`, `state`, `wallet_balance`, `outstanding_balance`) VALUES
+(1, 101, 1, 'AGT-1001', 'Rahul Sharma', 'Sharma Insurance Advisory', '9876543210', 'rahul.agent@demo.com', 'Ahmedabad', '380015', 'Gujarat', 0.00, 0.00),
+(2, 102, 2, 'AGT-1002', 'Priya Patel', 'Patel Care & Protection', '9876543211', 'priya.agent@demo.com', 'Surat', '395007', 'Gujarat', 0.00, 0.00),
+(3, 103, 3, 'AGT-1003', 'Amit Verma', 'Verma Financial Services', '9876543212', 'amit.agent@demo.com', 'Vadodara', '390020', 'Gujarat', 0.00, 0.00)
+ON DUPLICATE KEY UPDATE `agent_code`=VALUES(`agent_code`), `name`=VALUES(`name`);
+
+INSERT INTO `customers` (`id`, `agent_id`, `name`, `mobile`, `email`, `city`, `reference_code`, `family_relation`, `created_at`) VALUES
+(1, 1, 'Mukesh Patel', '9825012345', 'mukesh.patel@example.com', 'Ahmedabad', 'REF-PATEL1', NULL, NOW()),
+(2, 1, 'Meena Patel', '9825012346', 'meena.patel@example.com', 'Ahmedabad', 'REF-PATEL2', 'Wife', NOW()),
+(3, 1, 'Yash Patel', '9825012347', 'yash.patel@example.com', 'Ahmedabad', 'REF-PATEL3', 'Son', NOW()),
+(4, 2, 'Rajesh Mehta', '9825023456', 'rajesh.mehta@example.com', 'Surat', 'REF-MEHTA1', NULL, NOW()),
+(5, 2, 'Anita Mehta', '9825023457', 'anita.mehta@example.com', 'Surat', 'REF-MEHTA2', 'Wife', NOW()),
+(6, 3, 'Suresh Joshi', '9825034567', 'suresh.joshi@example.com', 'Vadodara', 'REF-JOSHI1', NULL, NOW()),
+(7, 2, 'Bhavna Shah', '9825045678', 'bhavna.shah@example.com', 'Rajkot', 'REF-SHAH1', NULL, NOW())
+ON DUPLICATE KEY UPDATE `name`=VALUES(`name`);
+
+UPDATE `customers` SET `family_head_id` = 1 WHERE `id` IN (2, 3);
+UPDATE `customers` SET `family_head_id` = 4 WHERE `id` = 5;
+
+INSERT INTO `vehicles` (`id`, `customer_id`, `vehicle_number`, `vehicle_type`, `make`, `model`, `fuel_type`, `created_at`) VALUES
+(1, 1, 'GJ-01-AB-1234', 'private_car', 'Hyundai', 'Creta 1.5 SX', 'Petrol', NOW()),
+(2, 2, 'GJ-01-CD-5678', 'two_wheeler', 'Honda', 'Activa 6G', 'Petrol', NOW()),
+(3, 4, 'GJ-05-EF-9012', 'commercial_goods', 'Tata Motors', 'Ace EV Cargo', 'Electric', NOW()),
+(4, 6, 'GJ-06-GH-3456', 'private_car', 'Maruti Suzuki', 'Brezza ZXi', 'Petrol', NOW()),
+(5, 7, 'GJ-03-JK-7890', 'two_wheeler', 'Royal Enfield', 'Classic 350', 'Petrol', NOW())
+ON DUPLICATE KEY UPDATE `model`=VALUES(`model`);
+
+INSERT INTO `policy_entries` (
+  `id`, `insurance_category`, `entry_date`, `branch_id`, `vehicle_id`, `vehicle_number`, `vehicle_type`,
+  `customer_id`, `customer_name`, `agent_id`, `agent_name`, `company_name`, `company_code`,
+  `policy_number`, `policy_type`, `business_type`, `total_premium_amount`, `idv`,
+  `tp_amount`, `od_amount`, `net_premium_amount`, `gst_amount`,
+  `sum_insured`, `plan_name`, `tpa_name`, `health_policy_type`, `members_count`, `members_details`,
+  `sum_assured`, `life_plan_type`, `policy_term`, `payment_frequency`, `nominee_name`, `nominee_relation`,
+  `policy_start_date`, `policy_end_date`, `status`, `created_by`
+) VALUES
+(1, 'motor', CURDATE(), 1, 1, 'GJ-01-AB-1234', 'private_car', 1, 'Mukesh Patel', 1, 'Rahul Sharma', 'HDFC ERGO General Insurance', 'HDFC-ERGO', 'HDFC-MOT-2025-98124', 'comprehensive', 'rollover', 18450.00, 850000.00, 3416.00, 12220.00, 15636.00, 2814.00, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, DATE_SUB(CURDATE(), INTERVAL 362 DAY), DATE_ADD(CURDATE(), INTERVAL 3 DAY), 'active', 1),
+(2, 'health', CURDATE(), 1, NULL, NULL, NULL, 1, 'Mukesh Patel', 1, 'Rahul Sharma', 'Star Health and Allied Insurance', 'STAR-HEALTH', 'STAR-HLT-2025-44219', NULL, 'renewal', 24600.00, NULL, 0.00, 0.00, 20847.00, 3753.00, 1000000.00, 'Family Health Optima', 'In-House TPA', 'floater', 3, 'Mukesh Patel (Self, 42), Meena Patel (Spouse, 39), Yash Patel (Son, 14)', NULL, NULL, NULL, NULL, 'Meena Patel', 'Wife', DATE_SUB(CURDATE(), INTERVAL 358 DAY), DATE_ADD(CURDATE(), INTERVAL 7 DAY), 'active', 1),
+(3, 'life', CURDATE(), 1, NULL, NULL, NULL, 1, 'Mukesh Patel', 1, 'Rahul Sharma', 'Life Insurance Corporation of India (LIC)', 'LIC-INDIA', 'LIC-LIFE-904128456', NULL, 'renewal', 45000.00, NULL, 0.00, 0.00, 42857.00, 2143.00, NULL, 'LIC Jeevan Umang', NULL, NULL, NULL, NULL, 2500000.00, 'whole_life', 20, 'yearly', 'Meena Patel', 'Wife', DATE_SUB(CURDATE(), INTERVAL 351 DAY), DATE_ADD(CURDATE(), INTERVAL 14 DAY), 'active', 1),
+(4, 'motor', CURDATE(), 1, 2, 'GJ-01-CD-5678', 'two_wheeler', 2, 'Meena Patel', 1, 'Rahul Sharma', 'ICICI Lombard General Insurance', 'ICICI-LOMBARD', 'ICICI-MOT-TW-78412', 'comprehensive', 'renewal', 2850.00, 58000.00, 814.00, 1601.00, 2415.00, 435.00, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, DATE_SUB(CURDATE(), INTERVAL 344 DAY), DATE_ADD(CURDATE(), INTERVAL 21 DAY), 'active', 1),
+(5, 'health', CURDATE(), 2, NULL, NULL, NULL, 4, 'Rajesh Mehta', 2, 'Priya Patel', 'Care Health Insurance', 'CARE-HEALTH', 'CARE-HLT-2025-77123', NULL, 'new', 19800.00, NULL, 0.00, 0.00, 16780.00, 3020.00, 750000.00, 'Care Supreme Floater', 'Care In-House', 'floater', 2, 'Rajesh Mehta (Self, 48), Anita Mehta (Spouse, 45)', NULL, NULL, NULL, NULL, 'Anita Mehta', 'Wife', DATE_SUB(CURDATE(), INTERVAL 337 DAY), DATE_ADD(CURDATE(), INTERVAL 28 DAY), 'active', 1),
+(6, 'motor', CURDATE(), 2, 3, 'GJ-05-EF-9012', 'commercial_goods', 4, 'Rajesh Mehta', 2, 'Priya Patel', 'Tata AIG General Insurance', 'TATA-AIG', 'TATA-COM-2025-33981', 'comprehensive', 'renewal', 28500.00, 620000.00, 12800.00, 11352.00, 24152.00, 4348.00, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, DATE_SUB(CURDATE(), INTERVAL 320 DAY), DATE_ADD(CURDATE(), INTERVAL 45 DAY), 'active', 1),
+(7, 'life', CURDATE(), 2, NULL, NULL, NULL, 4, 'Rajesh Mehta', 2, 'Priya Patel', 'HDFC Life Insurance', 'HDFC-LIFE', 'HDFC-LIFE-TERM-5512', NULL, 'new', 28000.00, NULL, 0.00, 0.00, 23728.00, 4272.00, NULL, 'Click 2 Protect Super', NULL, NULL, NULL, NULL, 10000000.00, 'term', 30, 'yearly', 'Anita Mehta', 'Wife', DATE_SUB(CURDATE(), INTERVAL 305 DAY), DATE_ADD(CURDATE(), INTERVAL 60 DAY), 'active', 1),
+(8, 'motor', CURDATE(), 3, 4, 'GJ-06-GH-3456', 'private_car', 6, 'Suresh Joshi', 3, 'Amit Verma', 'Bajaj Allianz General Insurance', 'BAJAJ-ALLIANZ', 'BAJAJ-PVT-2025-88124', 'comprehensive', 'renewal', 14200.00, 720000.00, 3416.00, 8618.00, 12034.00, 2166.00, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, DATE_SUB(CURDATE(), INTERVAL 275 DAY), DATE_ADD(CURDATE(), INTERVAL 90 DAY), 'active', 1),
+(9, 'health', CURDATE(), 3, NULL, NULL, NULL, 6, 'Suresh Joshi', 3, 'Amit Verma', 'Niva Bupa Health Insurance', 'NIVA-BUPA', 'NIVA-HLT-IND-66321', NULL, 'renewal', 11500.00, NULL, 0.00, 0.00, 9746.00, 1754.00, 500000.00, 'ReAssure 2.0 Individual', 'Niva Direct', 'individual', 1, 'Suresh Joshi (Self, 54)', NULL, NULL, NULL, NULL, 'Varun Joshi', 'Son', DATE_SUB(CURDATE(), INTERVAL 245 DAY), DATE_ADD(CURDATE(), INTERVAL 120 DAY), 'active', 1),
+(10, 'motor', CURDATE(), 2, 5, 'GJ-03-JK-7890', 'two_wheeler', 7, 'Bhavna Shah', 2, 'Priya Patel', 'New India Assurance', 'NEW-INDIA', 'NIA-TW-2024-11892', 'tp_only', 'rollover', 1014.00, NULL, 859.00, 0.00, 859.00, 155.00, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, DATE_SUB(CURDATE(), INTERVAL 370 DAY), DATE_SUB(CURDATE(), INTERVAL 5 DAY), 'expired', 1)
+ON DUPLICATE KEY UPDATE `policy_number`=VALUES(`policy_number`);
+
+INSERT INTO `reminder_schedules` (`policy_entry_id`, `reminder_type`, `scheduled_date`, `status`) VALUES
+(1, '7_days_before', DATE_SUB(DATE_ADD(CURDATE(), INTERVAL 3 DAY), INTERVAL 7 DAY), 'pending'),
+(1, '2_days_before', DATE_SUB(DATE_ADD(CURDATE(), INTERVAL 3 DAY), INTERVAL 2 DAY), 'pending'),
+(1, 'on_expiry', DATE_ADD(CURDATE(), INTERVAL 3 DAY), 'pending'),
+(2, '14_days_before', DATE_SUB(DATE_ADD(CURDATE(), INTERVAL 7 DAY), INTERVAL 14 DAY), 'pending'),
+(2, '7_days_before', DATE_SUB(DATE_ADD(CURDATE(), INTERVAL 7 DAY), INTERVAL 7 DAY), 'pending'),
+(2, 'on_expiry', DATE_ADD(CURDATE(), INTERVAL 7 DAY), 'pending'),
+(3, '30_days_before', DATE_SUB(DATE_ADD(CURDATE(), INTERVAL 14 DAY), INTERVAL 30 DAY), 'pending'),
+(3, '14_days_before', DATE_SUB(DATE_ADD(CURDATE(), INTERVAL 14 DAY), INTERVAL 14 DAY), 'pending'),
+(4, '30_days_before', DATE_SUB(DATE_ADD(CURDATE(), INTERVAL 21 DAY), INTERVAL 30 DAY), 'pending'),
+(4, '7_days_before', DATE_SUB(DATE_ADD(CURDATE(), INTERVAL 21 DAY), INTERVAL 7 DAY), 'pending'),
+(5, '30_days_before', DATE_SUB(DATE_ADD(CURDATE(), INTERVAL 28 DAY), INTERVAL 30 DAY), 'pending')
+ON DUPLICATE KEY UPDATE `status`=VALUES(`status`);
+
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ============================================================

@@ -1896,6 +1896,441 @@ function recalcBankLedger($conn, $bankId)
     }
     $conn->query("UPDATE bank_accounts SET current_balance = $bal WHERE id = $bankId");
 }
+
+function seedSamplePortfolioAndAgents($conn)
+{
+    echo '<br><div class="log-item log-info"><i class="fas fa-users-gear"></i> <strong>Seeding 3 Professional Agents &amp; 10 Client Policies...</strong></div>';
+
+    // 1. Ensure standard branches exist
+    $conn->query("INSERT IGNORE INTO branches (id, branch_code, name, mobile, email, address, city, pincode, state, wallet_balance, is_active) VALUES
+        (1, 'BR-01', 'Ahmedabad Main Branch', '9876500001', 'ahmedabad@demo.com', 'Ashram Road', 'Ahmedabad', '380009', 'Gujarat', 0.00, 1),
+        (2, 'BR-02', 'Surat Ring Road Branch', '9876500002', 'surat@demo.com', 'Ring Road', 'Surat', '395002', 'Gujarat', 0.00, 1),
+        (3, 'BR-03', 'Vadodara Alkapuri Branch', '9876500003', 'baroda@demo.com', 'Alkapuri', 'Vadodara', '390007', 'Gujarat', 0.00, 1)");
+
+    $pwd = password_hash('admin123', PASSWORD_DEFAULT);
+
+    // 2. Insert 3 Agents
+    $agentUsers = [
+        ['Rahul Sharma', 'rahul.agent@demo.com', '9876543210', 'AGT-1001', 'Sharma Insurance Advisory', 'Ahmedabad', '380015', 'Gujarat', 1],
+        ['Priya Patel', 'priya.agent@demo.com', '9876543211', 'AGT-1002', 'Patel Care & Protection', 'Surat', '395007', 'Gujarat', 2],
+        ['Amit Verma', 'amit.agent@demo.com', '9876543212', 'AGT-1003', 'Verma Financial Services', 'Vadodara', '390020', 'Gujarat', 3],
+    ];
+
+    $agentIds = [];
+    foreach ($agentUsers as $ag) {
+        $uRes = $conn->query("SELECT id FROM users WHERE email = '" . $conn->real_escape_string($ag[1]) . "' LIMIT 1");
+        if ($uRes && ($uRow = $uRes->fetch_assoc())) {
+            $uid = (int)$uRow['id'];
+            $conn->query("UPDATE users SET password_hash = '$pwd', is_active = 1, status = 'active', role = 'agent', phone = '{$ag[2]}' WHERE id = $uid");
+        } else {
+            $conn->query("INSERT INTO users (name, email, phone, password_hash, role, branch_id, is_active, status) VALUES
+                ('{$ag[0]}', '{$ag[1]}', '{$ag[2]}', '$pwd', 'agent', {$ag[8]}, 1, 'active')");
+            $uid = (int)$conn->insert_id;
+        }
+
+        $agRes = $conn->query("SELECT id FROM agents WHERE user_id = $uid LIMIT 1");
+        if ($agRes && ($agRow = $agRes->fetch_assoc())) {
+            $aid = (int)$agRow['id'];
+            $conn->query("UPDATE agents SET name = '{$ag[0]}', mobile = '{$ag[2]}', email = '{$ag[1]}', agent_code = '{$ag[3]}', agency_name = '{$ag[4]}', city = '{$ag[5]}', pincode = '{$ag[6]}', state = '{$ag[7]}', branch_id = {$ag[8]} WHERE id = $aid");
+        } else {
+            $conn->query("INSERT INTO agents (user_id, branch_id, agent_code, name, agency_name, mobile, email, city, pincode, state, wallet_balance, outstanding_balance) VALUES
+                ($uid, {$ag[8]}, '{$ag[3]}', '{$ag[0]}', '{$ag[4]}', '{$ag[2]}', '{$ag[1]}', '{$ag[5]}', '{$ag[6]}', '{$ag[7]}', 0.00, 0.00)");
+            $aid = (int)$conn->insert_id;
+        }
+        $agentIds[$ag[3]] = ['id' => $aid, 'user_id' => $uid, 'name' => $ag[0]];
+    }
+    echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Configured 3 Agents: Rahul Sharma (AGT-1001), Priya Patel (AGT-1002), Amit Verma (AGT-1003)</div>';
+
+    // 3. Insert Customers & Family Members
+    $custData = [
+        ['Mukesh Patel', '9825012345', 'mukesh.patel@example.com', 'Ahmedabad', 'REF-PATEL1', null, null, $agentIds['AGT-1001']['id']],
+        ['Meena Patel', '9825012346', 'meena.patel@example.com', 'Ahmedabad', 'REF-PATEL2', 'Wife', 'mukesh', $agentIds['AGT-1001']['id']],
+        ['Yash Patel', '9825012347', 'yash.patel@example.com', 'Ahmedabad', 'REF-PATEL3', 'Son', 'mukesh', $agentIds['AGT-1001']['id']],
+        ['Rajesh Mehta', '9825023456', 'rajesh.mehta@example.com', 'Surat', 'REF-MEHTA1', null, null, $agentIds['AGT-1002']['id']],
+        ['Anita Mehta', '9825023457', 'anita.mehta@example.com', 'Surat', 'REF-MEHTA2', 'Wife', 'rajesh', $agentIds['AGT-1002']['id']],
+        ['Suresh Joshi', '9825034567', 'suresh.joshi@example.com', 'Vadodara', 'REF-JOSHI1', null, null, $agentIds['AGT-1003']['id']],
+        ['Bhavna Shah', '9825045678', 'bhavna.shah@example.com', 'Rajkot', 'REF-SHAH1', null, null, $agentIds['AGT-1002']['id']]
+    ];
+
+    $custIds = [];
+    foreach ($custData as $c) {
+        $check = $conn->query("SELECT id FROM customers WHERE mobile = '{$c[1]}' LIMIT 1");
+        if ($check && ($row = $check->fetch_assoc())) {
+            $cid = (int)$row['id'];
+        } else {
+            $headId = 'NULL';
+            if (!empty($c[6]) && isset($custIds[$c[6]])) {
+                $headId = (int)$custIds[$c[6]];
+            }
+            $rel = !empty($c[5]) ? "'" . $conn->real_escape_string($c[5]) . "'" : 'NULL';
+            $agIdVal = !empty($c[7]) ? (int)$c[7] : 'NULL';
+            $conn->query("INSERT INTO customers (name, mobile, email, state, referral_code, family_relation, family_head_id, agent_id) VALUES
+                ('{$c[0]}', '{$c[1]}', '{$c[2]}', 'Gujarat', '{$c[4]}', $rel, $headId, $agIdVal)");
+            $cid = (int)$conn->insert_id;
+        }
+        $custKey = strtolower(explode(' ', $c[0])[0]);
+        $custIds[$custKey] = $cid;
+    }
+    echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Configured 7 Customers &amp; Family Members with Family Grouping</div>';
+
+    // 4. Insert Vehicles
+    $vehicles = [
+        ['GJ-01-AB-1234', 'Car', 'Hyundai', 'Creta 1.5 Petrol', 2023, 'Petrol', $custIds['mukesh']],
+        ['GJ-05-CD-5678', 'Two Wheeler', 'Honda', 'Activa 6G', 2022, 'Petrol', $custIds['rajesh']],
+        ['GJ-06-TR-9900', 'Commercial', 'Tata', 'Tata Ace EV', 2023, 'Electric', $custIds['suresh']],
+        ['GJ-03-EF-4321', 'Car', 'Maruti Suzuki', 'Brezza ZXi', 2023, 'Petrol', $custIds['bhavna']],
+        ['GJ-01-XY-9081', 'Two Wheeler', 'Royal Enfield', 'Classic 350', 2022, 'Petrol', $custIds['yash']]
+    ];
+    $vehIds = [];
+    foreach ($vehicles as $v) {
+        $chk = $conn->query("SELECT id FROM vehicles WHERE vehicle_number = '{$v[0]}' LIMIT 1");
+        if ($chk && ($r = $chk->fetch_assoc())) {
+            $vehIds[$v[0]] = (int)$r['id'];
+        } else {
+            $conn->query("INSERT INTO vehicles (vehicle_number, vehicle_type, make, model, year_of_manufacture, fuel_type, customer_id) VALUES
+                ('{$v[0]}', '{$v[1]}', '{$v[2]}', '{$v[3]}', {$v[4]}, '{$v[5]}', {$v[6]})");
+            $vehIds[$v[0]] = (int)$conn->insert_id;
+        }
+    }
+    echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Configured 5 Vehicles with Make and Models</div>';
+
+    // 5. 10 Sample Policies (Motor, Health, Life) with Upcoming Expiry & Reminders
+    $samplePolicies = [
+        [
+            'insurance_category' => 'motor',
+            'branch_id' => 1,
+            'vehicle_id' => $vehIds['GJ-01-AB-1234'],
+            'vehicle_number' => 'GJ-01-AB-1234',
+            'vehicle_type' => 'Car',
+            'customer_id' => $custIds['mukesh'],
+            'customer_name' => 'Mukesh Patel',
+            'agent_id' => $agentIds['AGT-1001']['id'],
+            'agent_name' => 'Rahul Sharma',
+            'company_name' => 'HDFC ERGO General Insurance',
+            'company_code' => 'HDFCERGO',
+            'policy_number' => 'HDFC-MOT-2024-88912',
+            'policy_type' => 'comprehensive',
+            'business_type' => 'renewal',
+            'total_premium_amount' => 18500.00,
+            'idv' => 950000.00,
+            'tp_amount' => 5500.00,
+            'od_amount' => 10200.00,
+            'net_premium_amount' => 15700.00,
+            'gst_amount' => 2800.00,
+            'policy_start_date' => date('Y-m-d', strtotime('-351 days')),
+            'policy_end_date' => date('Y-m-d', strtotime('+14 days')), // 14 days left
+            'status' => 'active'
+        ],
+        [
+            'insurance_category' => 'health',
+            'branch_id' => 1,
+            'vehicle_id' => null,
+            'vehicle_number' => null,
+            'vehicle_type' => null,
+            'customer_id' => $custIds['mukesh'],
+            'customer_name' => 'Mukesh Patel',
+            'agent_id' => $agentIds['AGT-1001']['id'],
+            'agent_name' => 'Rahul Sharma',
+            'company_name' => 'Star Health and Allied Insurance',
+            'company_code' => 'STARHEALTH',
+            'policy_number' => 'STAR-HLT-2024-44109',
+            'policy_type' => null,
+            'business_type' => 'renewal',
+            'total_premium_amount' => 24800.00,
+            'sum_insured' => 1000000.00,
+            'plan_name' => 'Star Comprehensive Health Floater',
+            'tpa_name' => 'Star Health In-House TPA',
+            'health_policy_type' => 'family_floater',
+            'members_count' => 3,
+            'members_details' => 'Mukesh Patel (Self, 46Y), Meena Patel (Wife, 43Y), Yash Patel (Son, 19Y)',
+            'tp_amount' => 0.00,
+            'od_amount' => 0.00,
+            'net_premium_amount' => 21016.95,
+            'gst_amount' => 3783.05,
+            'policy_start_date' => date('Y-m-d', strtotime('-358 days')),
+            'policy_end_date' => date('Y-m-d', strtotime('+7 days')), // 7 days left
+            'status' => 'active'
+        ],
+        [
+            'insurance_category' => 'life',
+            'branch_id' => 1,
+            'vehicle_id' => null,
+            'vehicle_number' => null,
+            'vehicle_type' => null,
+            'customer_id' => $custIds['mukesh'],
+            'customer_name' => 'Mukesh Patel',
+            'agent_id' => $agentIds['AGT-1001']['id'],
+            'agent_name' => 'Rahul Sharma',
+            'company_name' => 'Life Insurance Corporation of India (LIC)',
+            'company_code' => 'LIC',
+            'policy_number' => 'LIC-TERM-2024-190283',
+            'policy_type' => null,
+            'business_type' => 'new',
+            'total_premium_amount' => 16200.00,
+            'sum_assured' => 10000000.00,
+            'life_plan_type' => 'term',
+            'policy_term' => 30,
+            'payment_frequency' => 'yearly',
+            'nominee_name' => 'Meena Patel',
+            'nominee_relation' => 'Wife',
+            'tp_amount' => 0.00,
+            'od_amount' => 0.00,
+            'net_premium_amount' => 13728.81,
+            'gst_amount' => 2471.19,
+            'policy_start_date' => date('Y-m-d', strtotime('-337 days')),
+            'policy_end_date' => date('Y-m-d', strtotime('+28 days')), // 28 days left
+            'status' => 'active'
+        ],
+        [
+            'insurance_category' => 'motor',
+            'branch_id' => 2,
+            'vehicle_id' => $vehIds['GJ-05-CD-5678'],
+            'vehicle_number' => 'GJ-05-CD-5678',
+            'vehicle_type' => 'Two Wheeler',
+            'customer_id' => $custIds['rajesh'],
+            'customer_name' => 'Rajesh Mehta',
+            'agent_id' => $agentIds['AGT-1002']['id'],
+            'agent_name' => 'Priya Patel',
+            'company_name' => 'ICICI Lombard General Insurance',
+            'company_code' => 'ICICILOMBARD',
+            'policy_number' => 'ICICI-TW-2024-55198',
+            'policy_type' => 'comprehensive',
+            'business_type' => 'renewal',
+            'total_premium_amount' => 4200.00,
+            'idv' => 58000.00,
+            'tp_amount' => 1800.00,
+            'od_amount' => 1800.00,
+            'net_premium_amount' => 3600.00,
+            'gst_amount' => 600.00,
+            'policy_start_date' => date('Y-m-d', strtotime('-362 days')),
+            'policy_end_date' => date('Y-m-d', strtotime('+3 days')), // 3 days left
+            'status' => 'active'
+        ],
+        [
+            'insurance_category' => 'health',
+            'branch_id' => 2,
+            'vehicle_id' => null,
+            'vehicle_number' => null,
+            'vehicle_type' => null,
+            'customer_id' => $custIds['rajesh'],
+            'customer_name' => 'Rajesh Mehta',
+            'agent_id' => $agentIds['AGT-1002']['id'],
+            'agent_name' => 'Priya Patel',
+            'company_name' => 'Care Health Insurance',
+            'company_code' => 'CAREHEALTH',
+            'policy_number' => 'CARE-SUP-2024-77291',
+            'policy_type' => null,
+            'business_type' => 'renewal',
+            'total_premium_amount' => 14500.00,
+            'sum_insured' => 750000.00,
+            'plan_name' => 'Care Supreme Health Shield',
+            'tpa_name' => 'Care Health In-House TPA',
+            'health_policy_type' => 'individual',
+            'members_count' => 1,
+            'tp_amount' => 0.00,
+            'od_amount' => 0.00,
+            'net_premium_amount' => 12288.14,
+            'gst_amount' => 2211.86,
+            'policy_start_date' => date('Y-m-d', strtotime('-305 days')),
+            'policy_end_date' => date('Y-m-d', strtotime('+60 days')),
+            'status' => 'active'
+        ],
+        [
+            'insurance_category' => 'motor',
+            'branch_id' => 3,
+            'vehicle_id' => $vehIds['GJ-06-TR-9900'],
+            'vehicle_number' => 'GJ-06-TR-9900',
+            'vehicle_type' => 'Commercial',
+            'customer_id' => $custIds['suresh'],
+            'customer_name' => 'Suresh Joshi',
+            'agent_id' => $agentIds['AGT-1003']['id'],
+            'agent_name' => 'Amit Verma',
+            'company_name' => 'Tata AIG General Insurance',
+            'company_code' => 'TATAAIG',
+            'policy_number' => 'TATA-CV-2024-66381',
+            'policy_type' => 'comprehensive',
+            'business_type' => 'renewal',
+            'total_premium_amount' => 22400.00,
+            'idv' => 720000.00,
+            'tp_amount' => 9200.00,
+            'od_amount' => 9800.00,
+            'net_premium_amount' => 19000.00,
+            'gst_amount' => 3400.00,
+            'policy_start_date' => date('Y-m-d', strtotime('-363 days')),
+            'policy_end_date' => date('Y-m-d', strtotime('+2 days')), // 2 days left
+            'status' => 'active'
+        ],
+        [
+            'insurance_category' => 'life',
+            'branch_id' => 3,
+            'vehicle_id' => null,
+            'vehicle_number' => null,
+            'vehicle_type' => null,
+            'customer_id' => $custIds['suresh'],
+            'customer_name' => 'Suresh Joshi',
+            'agent_id' => $agentIds['AGT-1003']['id'],
+            'agent_name' => 'Amit Verma',
+            'company_name' => 'HDFC Life Insurance',
+            'company_code' => 'HDFCLIFE',
+            'policy_number' => 'HDFCL-SAV-2024-81920',
+            'policy_type' => null,
+            'business_type' => 'new',
+            'total_premium_amount' => 50000.00,
+            'sum_assured' => 2500000.00,
+            'life_plan_type' => 'endowment',
+            'policy_term' => 15,
+            'payment_frequency' => 'yearly',
+            'nominee_name' => 'Ramesh Joshi',
+            'nominee_relation' => 'Son',
+            'tp_amount' => 0.00,
+            'od_amount' => 0.00,
+            'net_premium_amount' => 47619.05,
+            'gst_amount' => 2380.95,
+            'policy_start_date' => date('Y-m-d', strtotime('-245 days')),
+            'policy_end_date' => date('Y-m-d', strtotime('+120 days')),
+            'status' => 'active'
+        ],
+        [
+            'insurance_category' => 'motor',
+            'branch_id' => 2,
+            'vehicle_id' => $vehIds['GJ-03-EF-4321'],
+            'vehicle_number' => 'GJ-03-EF-4321',
+            'vehicle_type' => 'Car',
+            'customer_id' => $custIds['bhavna'],
+            'customer_name' => 'Bhavna Shah',
+            'agent_id' => $agentIds['AGT-1002']['id'],
+            'agent_name' => 'Priya Patel',
+            'company_name' => 'Bajaj Allianz General Insurance',
+            'company_code' => 'BAJAJALLIANZ',
+            'policy_number' => 'BAJAJ-PVT-2024-33291',
+            'policy_type' => 'comprehensive',
+            'business_type' => 'renewal',
+            'total_premium_amount' => 13600.00,
+            'idv' => 780000.00,
+            'tp_amount' => 4500.00,
+            'od_amount' => 7000.00,
+            'net_premium_amount' => 11500.00,
+            'gst_amount' => 2100.00,
+            'policy_start_date' => date('Y-m-d', strtotime('-344 days')),
+            'policy_end_date' => date('Y-m-d', strtotime('+21 days')), // 21 days left
+            'status' => 'active'
+        ],
+        [
+            'insurance_category' => 'health',
+            'branch_id' => 2,
+            'vehicle_id' => null,
+            'vehicle_number' => null,
+            'vehicle_type' => null,
+            'customer_id' => $custIds['anita'],
+            'customer_name' => 'Anita Mehta',
+            'agent_id' => $agentIds['AGT-1002']['id'],
+            'agent_name' => 'Priya Patel',
+            'company_name' => 'Niva Bupa Health Insurance',
+            'company_code' => 'NIVABUPA',
+            'policy_number' => 'NIVA-SNR-2024-90182',
+            'policy_type' => null,
+            'business_type' => 'renewal',
+            'total_premium_amount' => 28900.00,
+            'sum_insured' => 500000.00,
+            'plan_name' => 'Niva Bupa Senior First Gold',
+            'tpa_name' => 'Niva Bupa In-House TPA',
+            'health_policy_type' => 'senior_citizen',
+            'members_count' => 1,
+            'tp_amount' => 0.00,
+            'od_amount' => 0.00,
+            'net_premium_amount' => 24491.53,
+            'gst_amount' => 4408.47,
+            'policy_start_date' => date('Y-m-d', strtotime('-355 days')),
+            'policy_end_date' => date('Y-m-d', strtotime('+10 days')), // 10 days left
+            'status' => 'active'
+        ],
+        [
+            'insurance_category' => 'motor',
+            'branch_id' => 1,
+            'vehicle_id' => $vehIds['GJ-01-XY-9081'],
+            'vehicle_number' => 'GJ-01-XY-9081',
+            'vehicle_type' => 'Two Wheeler',
+            'customer_id' => $custIds['yash'],
+            'customer_name' => 'Yash Patel',
+            'agent_id' => $agentIds['AGT-1001']['id'],
+            'agent_name' => 'Rahul Sharma',
+            'company_name' => 'The New India Assurance Co. Ltd.',
+            'company_code' => 'NEWINDIA',
+            'policy_number' => 'NIA-TW-2024-11827',
+            'policy_type' => 'comprehensive',
+            'business_type' => 'renewal',
+            'total_premium_amount' => 5800.00,
+            'idv' => 135000.00,
+            'tp_amount' => 2200.00,
+            'od_amount' => 2700.00,
+            'net_premium_amount' => 4900.00,
+            'gst_amount' => 900.00,
+            'policy_start_date' => date('Y-m-d', strtotime('-370 days')),
+            'policy_end_date' => date('Y-m-d', strtotime('-5 days')), // Expired 5 days ago
+            'status' => 'expired'
+        ]
+    ];
+
+    $polCount = 0;
+    foreach ($samplePolicies as $p) {
+        $chk = $conn->query("SELECT id FROM policy_entries WHERE policy_number = '{$p['policy_number']}' LIMIT 1");
+        if ($chk && ($r = $chk->fetch_assoc())) {
+            $pid = (int)$r['id'];
+        } else {
+            $vIdVal = !empty($p['vehicle_id']) ? (int)$p['vehicle_id'] : 'NULL';
+            $vNoVal = !empty($p['vehicle_number']) ? "'" . $conn->real_escape_string($p['vehicle_number']) . "'" : 'NULL';
+            $vTypeVal = !empty($p['vehicle_type']) ? "'" . $conn->real_escape_string($p['vehicle_type']) . "'" : 'NULL';
+            $polTypeVal = !empty($p['policy_type']) ? "'" . $conn->real_escape_string($p['policy_type']) . "'" : 'NULL';
+            $bizTypeVal = !empty($p['business_type']) ? "'" . $conn->real_escape_string($p['business_type']) . "'" : "'new'";
+            $idvVal = !empty($p['idv']) ? (float)$p['idv'] : 'NULL';
+            $siVal = !empty($p['sum_insured']) ? (float)$p['sum_insured'] : 'NULL';
+            $saVal = !empty($p['sum_assured']) ? (float)$p['sum_assured'] : 'NULL';
+            $planVal = !empty($p['plan_name']) ? "'" . $conn->real_escape_string($p['plan_name']) . "'" : 'NULL';
+            $tpaVal = !empty($p['tpa_name']) ? "'" . $conn->real_escape_string($p['tpa_name']) . "'" : 'NULL';
+            $hTypeVal = !empty($p['health_policy_type']) ? "'" . $conn->real_escape_string($p['health_policy_type']) . "'" : 'NULL';
+            $mCountVal = !empty($p['members_count']) ? (int)$p['members_count'] : 'NULL';
+            $mDetailsVal = !empty($p['members_details']) ? "'" . $conn->real_escape_string($p['members_details']) . "'" : 'NULL';
+            $lTypeVal = !empty($p['life_plan_type']) ? "'" . $conn->real_escape_string($p['life_plan_type']) . "'" : 'NULL';
+            $pTermVal = !empty($p['policy_term']) ? (int)$p['policy_term'] : 'NULL';
+            $freqVal = !empty($p['payment_frequency']) ? "'" . $conn->real_escape_string($p['payment_frequency']) . "'" : 'NULL';
+            $nomNameVal = !empty($p['nominee_name']) ? "'" . $conn->real_escape_string($p['nominee_name']) . "'" : 'NULL';
+            $nomRelVal = !empty($p['nominee_relation']) ? "'" . $conn->real_escape_string($p['nominee_relation']) . "'" : 'NULL';
+
+            $sql = "INSERT INTO policy_entries (
+                insurance_category, entry_date, branch_id, vehicle_id, vehicle_number, vehicle_type,
+                customer_id, customer_name, agent_id, agent_name, company_name, company_code,
+                policy_number, policy_type, business_type, total_premium_amount, idv,
+                tp_amount, od_amount, net_premium_amount, gst_amount,
+                sum_insured, plan_name, tpa_name, health_policy_type, members_count, members_details,
+                sum_assured, life_plan_type, policy_term, payment_frequency, nominee_name, nominee_relation,
+                policy_start_date, policy_end_date, status, created_by
+            ) VALUES (
+                '{$p['insurance_category']}', '{$p['policy_start_date']}', {$p['branch_id']}, $vIdVal, $vNoVal, $vTypeVal,
+                {$p['customer_id']}, '{$p['customer_name']}', {$p['agent_id']}, '{$p['agent_name']}', '{$p['company_name']}', '{$p['company_code']}',
+                '{$p['policy_number']}', $polTypeVal, $bizTypeVal, {$p['total_premium_amount']}, $idvVal,
+                {$p['tp_amount']}, {$p['od_amount']}, {$p['net_premium_amount']}, {$p['gst_amount']},
+                $siVal, $planVal, $tpaVal, $hTypeVal, $mCountVal, $mDetailsVal,
+                $saVal, $lTypeVal, $pTermVal, $freqVal, $nomNameVal, $nomRelVal,
+                '{$p['policy_start_date']}', '{$p['policy_end_date']}', '{$p['status']}', 1
+            )";
+            $conn->query($sql);
+            $pid = (int)$conn->insert_id;
+        }
+
+        // Schedule renewal reminders if table exists
+        try {
+            $conn->query("INSERT IGNORE INTO reminder_schedules (policy_entry_id, reminder_type, scheduled_date, status) VALUES
+                ($pid, '30_days_before', DATE_SUB('{$p['policy_end_date']}', INTERVAL 30 DAY), 'pending'),
+                ($pid, '14_days_before', DATE_SUB('{$p['policy_end_date']}', INTERVAL 14 DAY), 'pending'),
+                ($pid, '7_days_before', DATE_SUB('{$p['policy_end_date']}', INTERVAL 7 DAY), 'pending'),
+                ($pid, '2_days_before', DATE_SUB('{$p['policy_end_date']}', INTERVAL 2 DAY), 'pending'),
+                ($pid, 'on_expiry', '{$p['policy_end_date']}', 'pending')");
+        } catch (\Throwable $e) {}
+
+        $polCount++;
+    }
+    echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Seeded ' . $polCount . ' realistic Policies (Motor, Health, Life) across top Indian insurers</div>';
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -1940,6 +2375,22 @@ function recalcBankLedger($conn, $bankId)
                 echo '<a href="dashboard.php" class="btn btn-primary"><i class="fas fa-gauge-high"></i> Go to Dashboard</a>';
                 echo ' <a href="setup.php" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Back to Setup</a>';
 
+            } elseif ($action === 'seed_sample_portfolio') {
+                echo '<h2><i class="fas fa-folder-plus"></i> Seed Sample Portfolio</h2>';
+                echo '<p class="subtitle">Seeding 3 active agents and 10 realistic policies across Motor, Health, and Life Insurance with upcoming expiry dates.</p><hr>';
+                $conn = setupConn();
+                echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Database connection successful</div>';
+                seedSamplePortfolioAndAgents($conn);
+                $conn->close();
+                echo '<div class="credentials-box" style="margin-top:20px;"><strong><i class="fas fa-users"></i> Seeded Agent Login Details:</strong><br><br>';
+                echo '<strong>Agent 1:</strong> rahul.agent@demo.com / 9876543210 (Password: <code>admin123</code>) — Code: AGT-1001<br>';
+                echo '<strong>Agent 2:</strong> priya.agent@demo.com / 9876543211 (Password: <code>admin123</code>) — Code: AGT-1002<br>';
+                echo '<strong>Agent 3:</strong> amit.agent@demo.com / 9876543212 (Password: <code>admin123</code>) — Code: AGT-1003<br><br>';
+                echo '<em class="text-success"><i class="fas fa-check"></i> 10 policies linked to customers with realistic expiry tracking!</em></div>';
+                echo '<br><a href="dashboard.php" class="btn btn-primary"><i class="fas fa-gauge-high"></i> Go to Dashboard</a>';
+                echo ' <a href="policy_entries.php" class="btn" style="background:#0284c7;color:#fff;"><i class="fas fa-file-shield"></i> View Policies</a>';
+                echo ' <a href="setup.php" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Back to Setup</a>';
+
             } elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'reset' && ($_POST['confirm'] ?? '') === 'yes' && hash_equals($_SESSION['setup_tok'] ?? '', $_POST['tok'] ?? '')) {
                 unset($_SESSION['setup_tok']); // single use
                 echo '<h2><i class="fas fa-database"></i> Database Reset</h2>';
@@ -1973,6 +2424,7 @@ function recalcBankLedger($conn, $bankId)
                 echo '<div class="setup-actions">';
                 echo '<a href="setup.php?action=update" class="btn btn-primary"><i class="fas fa-sync-alt"></i> Run Update (Safe)</a>';
                 echo '<a href="setup.php?action=clean_brokerage_schema" class="btn" style="background:#0284c7;color:#fff;"><i class="fas fa-trash-alt"></i> Clean Brokerage &amp; Commission Schema</a>';
+                echo '<a href="setup.php?action=seed_sample_portfolio" class="btn" style="background:#10b981;color:#fff;"><i class="fas fa-folder-plus"></i> Seed Sample Portfolio (3 Agents + 10 Policies)</a>';
                 $_SESSION['setup_tok'] = bin2hex(random_bytes(16));
                 echo '<form method="post" action="setup.php" id="resetForm"><input type="hidden" name="action" value="reset"><input type="hidden" name="confirm" value="yes"><input type="hidden" name="tok" value="' . $_SESSION['setup_tok'] . '"></form>';
                 echo '<button type="button" class="btn btn-danger" onclick="confirmReset()"><i class="fas fa-triangle-exclamation"></i> Drop All &amp; Reseed (Destructive)</button>';
