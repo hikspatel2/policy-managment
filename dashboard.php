@@ -186,7 +186,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'getAgentStats') {
     $stmt->close();
 
     // premium + commission for selected range (exclude cancelled)
-    $stmt = $conn->prepare("SELECT COALESCE(SUM(total_premium_amount), 0) as prem, COALESCE(SUM(agent_commission_amount), 0) as comm FROM policy_entries WHERE agent_id = ? AND status != 'cancelled' AND entry_date BETWEEN ? AND ?");
+    $stmt = $conn->prepare("SELECT COALESCE(SUM(total_premium_amount), 0) as prem, 0.00 as comm FROM policy_entries WHERE agent_id = ? AND status != 'cancelled' AND entry_date BETWEEN ? AND ?");
     $stmt->bind_param("iss", $agentId, $rFrom, $rTo);
     $stmt->execute();
     $agSums = $stmt->get_result()->fetch_assoc();
@@ -237,7 +237,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'getAgentStats') {
     $stmt->close();
 
     // monthly commission within selected range (exclude cancelled)
-    $stmt = $conn->prepare("SELECT DATE_FORMAT(entry_date, '%Y-%m') as m, SUM(agent_commission_amount) as commission, COUNT(*) as policies FROM policy_entries WHERE agent_id = ? AND status != 'cancelled' AND entry_date BETWEEN ? AND ? GROUP BY m ORDER BY m");
+    $stmt = $conn->prepare("SELECT DATE_FORMAT(entry_date, '%Y-%m') as m, 0.00 as commission, COUNT(*) as policies FROM policy_entries WHERE agent_id = ? AND status != 'cancelled' AND entry_date BETWEEN ? AND ? GROUP BY m ORDER BY m");
     $stmt->bind_param("iss", $agentId, $rFrom, $rTo);
     $stmt->execute();
     $monthlyCommission = [];
@@ -288,7 +288,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'getAgentStats') {
     $prevR = prevDateRange($rangeKey, $rFrom, $rTo);
     $prev = null;
     if ($prevR) {
-        $pv = dxRows($conn, "SELECT COUNT(*) AS cnt, COALESCE(SUM(total_premium_amount), 0) AS prem, COALESCE(SUM(agent_commission_amount), 0) AS comm FROM policy_entries WHERE agent_id = ? AND status != 'cancelled' AND entry_date BETWEEN ? AND ?", 'iss', $agentId, $prevR[0], $prevR[1])[0];
+        $pv = dxRows($conn, "SELECT COUNT(*) AS cnt, COALESCE(SUM(total_premium_amount), 0) AS prem, 0.00 AS comm FROM policy_entries WHERE agent_id = ? AND status != 'cancelled' AND entry_date BETWEEN ? AND ?", 'iss', $agentId, $prevR[0], $prevR[1])[0];
         $prev = ['count' => (int) $pv['cnt'], 'premium' => (float) $pv['prem'], 'commission' => (float) $pv['comm']];
     }
     $rangeCount = (int) dxRows($conn, "SELECT COUNT(*) AS c FROM policy_entries WHERE agent_id = ? AND status != 'cancelled' AND entry_date BETWEEN ? AND ?", 'iss', $agentId, $rFrom, $rTo)[0]['c'];
@@ -470,7 +470,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'getDashboardStats') {
     $cancelledPolicies = $conn->query("SELECT COUNT(*) as t FROM policy_entries WHERE status = 'cancelled'")->fetch_assoc()['t'];
 
     // premium + commissions for selected range (exclude cancelled)
-    $stmt = $conn->prepare("SELECT COALESCE(SUM(total_premium_amount), 0) as premium, COALESCE(SUM(buyer_commission_amount), 0) as buyer_comm, COALESCE(SUM(agent_commission_amount), 0) as agent_comm, COUNT(*) as cnt FROM policy_entries WHERE status != 'cancelled' AND entry_date BETWEEN ? AND ?");
+    $stmt = $conn->prepare("SELECT COALESCE(SUM(total_premium_amount), 0) as premium, 0.00 as buyer_comm, 0.00 as agent_comm, COUNT(*) as cnt FROM policy_entries WHERE status != 'cancelled' AND entry_date BETWEEN ? AND ?");
     $stmt->bind_param("ss", $rFrom, $rTo);
     $stmt->execute();
     $sums = $stmt->get_result()->fetch_assoc();
@@ -487,12 +487,12 @@ if (isset($_GET['action']) && $_GET['action'] === 'getDashboardStats') {
     $tmEnd = date('Y-m-d');
     $lmStart = date('Y-m-01', strtotime('first day of last month'));
     $lmEnd = date('Y-m-t', strtotime('first day of last month'));
-    $cmpStmt = $conn->prepare("SELECT COALESCE(SUM(total_premium_amount),0) as premium, COUNT(*) as cnt, COALESCE(SUM(buyer_commission_amount),0)-COALESCE(SUM(agent_commission_amount),0) as spread FROM policy_entries WHERE status != 'cancelled' AND entry_date BETWEEN ? AND ?");
+    $cmpStmt = $conn->prepare("SELECT COALESCE(SUM(total_premium_amount),0) as premium, COUNT(*) as cnt, 0.00 as spread FROM policy_entries WHERE status != 'cancelled' AND entry_date BETWEEN ? AND ?");
     $cmpStmt->bind_param("ss", $tmStart, $tmEnd);
     $cmpStmt->execute();
     $thisMonth = $cmpStmt->get_result()->fetch_assoc();
     $cmpStmt->close();
-    $cmpStmt = $conn->prepare("SELECT COALESCE(SUM(total_premium_amount),0) as premium, COUNT(*) as cnt, COALESCE(SUM(buyer_commission_amount),0)-COALESCE(SUM(agent_commission_amount),0) as spread FROM policy_entries WHERE status != 'cancelled' AND entry_date BETWEEN ? AND ?");
+    $cmpStmt = $conn->prepare("SELECT COALESCE(SUM(total_premium_amount),0) as premium, COUNT(*) as cnt, 0.00 as spread FROM policy_entries WHERE status != 'cancelled' AND entry_date BETWEEN ? AND ?");
     $cmpStmt->bind_param("ss", $lmStart, $lmEnd);
     $cmpStmt->execute();
     $lastMonth = $cmpStmt->get_result()->fetch_assoc();
@@ -543,7 +543,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'getDashboardStats') {
 
     // monthly premium within selected range (exclude cancelled)
     $monthlyPremium = [];
-    $mpStmt = $conn->prepare("SELECT DATE_FORMAT(entry_date, '%Y-%m') as m, SUM(total_premium_amount) as premium, SUM(buyer_commission_amount) as buyer_comm, SUM(agent_commission_amount) as agent_comm FROM policy_entries WHERE status != 'cancelled' AND entry_date BETWEEN ? AND ? GROUP BY m ORDER BY m");
+    $mpStmt = $conn->prepare("SELECT DATE_FORMAT(entry_date, '%Y-%m') as m, SUM(total_premium_amount) as premium, 0.00 as buyer_comm, 0.00 as agent_comm FROM policy_entries WHERE status != 'cancelled' AND entry_date BETWEEN ? AND ? GROUP BY m ORDER BY m");
     $mpStmt->bind_param("ss", $rFrom, $rTo);
     $mpStmt->execute();
     $mpRes = $mpStmt->get_result();
@@ -580,9 +580,9 @@ if (isset($_GET['action']) && $_GET['action'] === 'getDashboardStats') {
         $topAgents[] = $row;
     }
 
-    // top 5 buyers (exclude cancelled)
+    // top 5 companies (exclude cancelled)
     $topBuyers = [];
-    $tbRes = $conn->query("SELECT company_name, SUM(total_premium_amount) as premium, COUNT(*) as policies FROM policy_entries WHERE status != 'cancelled' GROUP BY buyer_id, company_name ORDER BY premium DESC LIMIT 5");
+    $tbRes = $conn->query("SELECT company_name, SUM(total_premium_amount) as premium, COUNT(*) as policies FROM policy_entries WHERE status != 'cancelled' GROUP BY company_name ORDER BY premium DESC LIMIT 5");
     while ($row = $tbRes->fetch_assoc()) {
         $topBuyers[] = $row;
     }
@@ -622,7 +622,7 @@ if (isset($_GET['action']) && $_GET['action'] === 'getDashboardStats') {
     $prevR = prevDateRange($rangeKey, $rFrom, $rTo);
     $prev = null;
     if ($prevR) {
-        $pv = dxRows($conn, "SELECT COUNT(*) AS cnt, COALESCE(SUM(total_premium_amount), 0) AS prem, COALESCE(SUM(buyer_commission_amount), 0) - COALESCE(SUM(agent_commission_amount), 0) AS spread FROM policy_entries WHERE status != 'cancelled' AND entry_date BETWEEN ? AND ?", 'ss', $prevR[0], $prevR[1])[0];
+        $pv = dxRows($conn, "SELECT COUNT(*) AS cnt, COALESCE(SUM(total_premium_amount), 0) AS prem, 0.00 AS spread FROM policy_entries WHERE status != 'cancelled' AND entry_date BETWEEN ? AND ?", 'ss', $prevR[0], $prevR[1])[0];
         $pExp = dxRows($conn, "SELECT COALESCE(SUM(amount), 0) AS t FROM expenses WHERE approval_status = 'approved' AND expense_date BETWEEN ? AND ?", 'ss', $prevR[0], $prevR[1])[0]['t'];
         $pInc = dxRows($conn, "SELECT COALESCE(SUM(amount), 0) AS t FROM other_income WHERE income_date BETWEEN ? AND ?", 'ss', $prevR[0], $prevR[1])[0]['t'];
         $prev = ['count' => (int) $pv['cnt'], 'premium' => (float) $pv['prem'], 'netMargin' => (float) $pv['spread'] - (float) $pExp + (float) $pInc];

@@ -229,24 +229,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                                 }
                             } catch (Throwable $ce) {}
                         } elseif ($user['role'] === 'agent') {
-                            try {
-                                $aid = agentIdForUser($conn, $user['id']);
-                                if ($uStatus === 'pending_verification') {
-                                    $targetUrl = 'agent_verify.php';
-                                } elseif ($uStatus === 'verification_completed' || $uStatus === 'pending_subscription') {
-                                    $targetUrl = 'agent_plans.php';
-                                } else {
-                                    // Check active subscription safely
-                                    $sub = ($aid && function_exists('getAgentSubscription')) ? getAgentSubscription($conn, $aid) : null;
-                                    if (!$sub || !$sub['is_valid']) {
-                                        $targetUrl = 'agent_plans.php';
-                                    } elseif (empty($user['profile_setup_completed'])) {
-                                        $targetUrl = 'agent_setup.php';
-                                    }
-                                }
-                            } catch (Throwable $ae) {
-                                $targetUrl = 'dashboard.php';
-                            }
+                            $targetUrl = 'dashboard.php';
                         }
 
                         // update last login safely (support tables with or without last_login_ip)

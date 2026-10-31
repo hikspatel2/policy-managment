@@ -75,12 +75,9 @@ if (!$user || $user['role'] !== 'agent') {
     exit();
 }
 
-// If already verified and active, send to plans or dashboard
-if ($user['status'] === 'active') {
+// If already verified, active, or pending setup, send straight to dashboard
+if (empty($user['status']) || $user['status'] === 'active' || $user['status'] === 'verification_completed' || $user['status'] === 'pending_subscription') {
     header("Location: dashboard.php");
-    exit();
-} elseif ($user['status'] === 'verification_completed' || $user['status'] === 'pending_subscription') {
-    header("Location: agent_plans.php");
     exit();
 }
 

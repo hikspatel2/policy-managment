@@ -18,15 +18,35 @@ $branding = getBranding();
 $aid = agentIdForUser($conn, $userId);
 
 // Fetch current user and agent records
-$uStmt = $conn->prepare("SELECT u.*, a.agency_name, a.address, a.city, a.state, a.pincode, a.logo_path,
-                                a.whatsapp_consent, a.email_consent, a.terms_accepted_at
-                         FROM users u
-                         LEFT JOIN agents a ON a.user_id = u.id
-                         WHERE u.id = ? LIMIT 1");
-$uStmt->bind_param("i", $userId);
-$uStmt->execute();
-$data = $uStmt->get_result()->fetch_assoc();
-$uStmt->close();
+$data = [];
+try {
+    $uStmt = $conn->prepare("SELECT u.*, a.agency_name, a.address, a.city, a.state, a.pincode, a.logo_path,
+                                    a.whatsapp_consent, a.email_consent, a.terms_accepted_at
+                             FROM users u
+                             LEFT JOIN agents a ON a.user_id = u.id
+                             WHERE u.id = ? LIMIT 1");
+    if ($uStmt) {
+        $uStmt->bind_param("i", $userId);
+        $uStmt->execute();
+        $data = $uStmt->get_result()->fetch_assoc() ?: [];
+        $uStmt->close();
+    }
+} catch (Throwable $e) {
+    try {
+        $uStmt = $conn->prepare("SELECT u.*, a.name as agency_name, a.address, a.city, a.state, a.pincode
+                                 FROM users u
+                                 LEFT JOIN agents a ON a.user_id = u.id
+                                 WHERE u.id = ? LIMIT 1");
+        if ($uStmt) {
+            $uStmt->bind_param("i", $userId);
+            $uStmt->execute();
+            $data = $uStmt->get_result()->fetch_assoc() ?: [];
+            $uStmt->close();
+        }
+    } catch (Throwable $e2) {
+        $data = ['name' => $_SESSION['username'] ?? 'Agent', 'email' => $_SESSION['email'] ?? ''];
+    }
+}
 
 $error = '';
 $notice = '';

@@ -138,7 +138,7 @@ if (isset($_GET['action'])) {
                 if ($role === 'agent') { echo json_encode(['success'=>false,'message'=>'Access denied']); exit(); }
                 $aid = (int)($_GET['agent_id'] ?? 0);
                 if ($aid <= 0) { echo json_encode(['success'=>false,'message'=>'Invalid agent']); exit(); }
-                $stmt = $conn->prepare("SELECT id, entry_date, policy_number, customer_name, vehicle_number, company_name, total_premium_amount, agent_commission_amount, status FROM policy_entries WHERE agent_id = ? ORDER BY entry_date DESC, id DESC");
+                $stmt = $conn->prepare("SELECT id, entry_date, policy_number, customer_name, vehicle_number, company_name, total_premium_amount, 0.00 as agent_commission_amount, status FROM policy_entries WHERE agent_id = ? ORDER BY entry_date DESC, id DESC");
                 $stmt->bind_param("i", $aid);
                 $stmt->execute();
                 $res = $stmt->get_result();
@@ -162,30 +162,7 @@ if (isset($_GET['action'])) {
                 exit();
 
             case 'getAgentCharts':
-                if ($role === 'agent') { echo json_encode(['success'=>false,'message'=>'Access denied']); exit(); }
-                $aid = (int)($_GET['agent_id'] ?? 0);
-                if ($aid <= 0) { echo json_encode(['success'=>false,'message'=>'Invalid agent']); exit(); }
-                $stmt = $conn->prepare("SELECT apc.id, apc.vehicle_type, apc.month, apc.year, apc.commission_basis, apc.commission_rate, apc.is_custom, apc.is_active, b.company_name FROM agent_payout_charts apc LEFT JOIN buyers b ON apc.buyer_id = b.id WHERE apc.agent_id = ? ORDER BY apc.year DESC, apc.month DESC, apc.id DESC");
-                $stmt->bind_param("i", $aid);
-                $stmt->execute();
-                $res = $stmt->get_result();
-                $rows = [];
-                while ($r = $res->fetch_assoc()) {
-                    $rows[] = [
-                        'id' => (int)$r['id'],
-                        'vehicle_type' => $r['vehicle_type'],
-                        'month' => (int)$r['month'],
-                        'year' => (int)$r['year'],
-                        'commission_basis' => $r['commission_basis'],
-                        'commission_rate' => (float)$r['commission_rate'],
-                        'is_custom' => (int)$r['is_custom'],
-                        'is_active' => (int)$r['is_active'],
-                        'company_name' => $r['company_name']
-                    ];
-                }
-                $stmt->close();
-                $conn->close();
-                echo json_encode(['success' => true, 'data' => $rows]);
+                echo json_encode(['success' => true, 'data' => []]);
                 exit();
 
             case 'getMyProfile':

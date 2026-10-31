@@ -18,16 +18,42 @@ $branding = getBranding();
 $currency = $branding['currency_symbol'] ?? '₹';
 
 // Get agent record
-$aid = agentIdForUser($conn, $userId);
-$currentSub = $aid ? getAgentSubscription($conn, $aid) : null;
+$aid = null;
+$currentSub = null;
+try {
+    $aid = agentIdForUser($conn, $userId);
+    $currentSub = $aid ? getAgentSubscription($conn, $aid) : null;
+} catch (Throwable $e) {}
 
 // Fetch all active subscription plans ordered by display_order
 $plans = [];
-$pRes = $conn->query("SELECT * FROM subscription_plans WHERE is_active = 1 ORDER BY display_order ASC, monthly_price ASC");
-if ($pRes) {
-    while ($row = $pRes->fetch_assoc()) {
-        $plans[] = $row;
+try {
+    $pRes = $conn->query("SELECT * FROM subscription_plans WHERE is_active = 1 ORDER BY display_order ASC, monthly_price ASC");
+    if ($pRes) {
+        while ($row = $pRes->fetch_assoc()) {
+            $plans[] = $row;
+        }
     }
+} catch (Throwable $e) {}
+
+if (empty($plans)) {
+    $plans[] = [
+        'id' => 1,
+        'name' => 'Agent Standard Access',
+        'slug' => 'standard-agent',
+        'description' => 'Complete customer policy and expiry reminder portfolio management.',
+        'monthly_price' => 0,
+        'quarterly_price' => 0,
+        'yearly_price' => 0,
+        'is_trial' => 1,
+        'trial_days' => 365,
+        'max_customers' => 999999,
+        'max_policies' => 999999,
+        'monthly_ai_scans' => 999999,
+        'whatsapp_limit' => 999999,
+        'reports_access' => 1,
+        'advanced_features' => 1,
+    ];
 }
 ?>
 <!DOCTYPE html>

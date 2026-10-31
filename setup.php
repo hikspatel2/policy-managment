@@ -971,6 +971,11 @@ function cleanupBrokerageAndCommissionSchema($conn)
             }
         }
     }
+
+    // 5. Ensure all agent accounts are active and unblocked for policy & reminder management
+    try {
+        $conn->query("UPDATE users SET status = 'active' WHERE role = 'agent' AND (status IS NULL OR status IN ('pending_verification','verification_completed','pending_subscription'))");
+    } catch (\Throwable $e) {}
 }
 
 // additive column/index/seed-setting fixups for existing installs
@@ -988,8 +993,7 @@ function setupColumnFixups($conn)
     addColumnIfNotExists($conn, 'policy_entries', 'tp_amount', "DECIMAL(12,2) DEFAULT 0.00 AFTER total_premium_amount");
     addColumnIfNotExists($conn, 'policy_entries', 'od_amount', "DECIMAL(12,2) DEFAULT 0.00 AFTER tp_amount");
     addColumnIfNotExists($conn, 'policy_entries', 'net_premium_amount', "DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER od_amount");
-    addColumnIfNotExists($conn, 'policy_entries', 'is_commission_manual', "BOOLEAN DEFAULT FALSE AFTER agent_commission_amount");
-    addColumnIfNotExists($conn, 'policy_entries', 'bank_account_id', "BIGINT NULL AFTER is_commission_manual");
+    addColumnIfNotExists($conn, 'policy_entries', 'bank_account_id', "BIGINT NULL AFTER net_premium_amount");
     addColumnIfNotExists($conn, 'policy_entries', 'bank_name', "VARCHAR(100) NULL AFTER bank_account_id");
     addColumnIfNotExists($conn, 'policy_entries', 'payment_in', "DECIMAL(12,2) DEFAULT 0.00 AFTER bank_name");
     addColumnIfNotExists($conn, 'policy_entries', 'payment_out', "DECIMAL(12,2) DEFAULT 0.00 AFTER payment_in");
@@ -1494,75 +1498,29 @@ function seedDemoData($conn)
         ('VH-0020', 'Two Wheeler', 'Make D', 'Model 20', 2024, 'Petrol', 20)");
     echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Seeded 20 vehicles</div>';
 
-    $polCols = "(entry_date, branch_id, vehicle_id, vehicle_number, vehicle_type, customer_id, customer_name, agent_id, agent_name, buyer_id, company_name, company_code, policy_number, total_premium_amount, tp_amount, od_amount, net_premium_amount, buyer_commission_basis, buyer_commission_rate, buyer_commission_amount, agent_commission_basis, agent_commission_rate, agent_commission_amount, policy_start_date, policy_end_date, status, created_by)";
+    $polCols = "(entry_date, branch_id, vehicle_id, vehicle_number, vehicle_type, customer_id, customer_name, agent_id, agent_name, company_name, company_code, policy_number, total_premium_amount, tp_amount, od_amount, net_premium_amount, policy_start_date, policy_end_date, status, created_by)";
     $conn->query("INSERT INTO policy_entries $polCols VALUES
-        (DATE_SUB(CURDATE(), INTERVAL 100 DAY), 1, 1, 'VH-0001', 'Car', 1, 'Customer 1', 1, 'Agent 1', 1, 'Company 1', 'CMP1', 'POL-2025-001', 15000.00, 5000.00, 8000.00, 13000.00, 'premium_pct', 15.0000, 2250.00, 'premium_pct', 10.0000, 1500.00, DATE_SUB(CURDATE(), INTERVAL 100 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 100 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 95 DAY), 2, 2, 'VH-0002', 'Two Wheeler', 2, 'Customer 2', 2, 'Agent 2', 2, 'Company 2', 'CMP2', 'POL-2025-002', 5000.00, 2000.00, 2500.00, 4500.00, 'premium_pct', 12.0000, 600.00, 'premium_pct', 8.0000, 400.00, DATE_SUB(CURDATE(), INTERVAL 95 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 95 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 90 DAY), 3, 3, 'VH-0003', 'Commercial', 3, 'Customer 3', 3, 'Agent 3', 3, 'Company 3', 'CMP3', 'POL-2025-003', 25000.00, 10000.00, 12000.00, 22000.00, 'premium_pct', 18.0000, 4500.00, 'premium_pct', 12.0000, 3000.00, DATE_SUB(CURDATE(), INTERVAL 90 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 90 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 85 DAY), 4, 4, 'VH-0004', 'Car', 4, 'Customer 4', 1, 'Agent 1', 4, 'Company 4', 'CMP4', 'POL-2025-004', 12000.00, 4000.00, 6500.00, 10500.00, 'premium_pct', 14.0000, 1680.00, 'premium_pct', 10.0000, 1200.00, DATE_SUB(CURDATE(), INTERVAL 85 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 85 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 80 DAY), 5, 5, 'VH-0005', 'Two Wheeler', 5, 'Customer 5', 2, 'Agent 2', 5, 'Company 5', 'CMP5', 'POL-2025-005', 8000.00, 3000.00, 4000.00, 7000.00, 'premium_pct', 13.0000, 1040.00, 'premium_pct', 9.0000, 720.00, DATE_SUB(CURDATE(), INTERVAL 80 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 80 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 75 DAY), 1, 6, 'VH-0006', 'Commercial', 6, 'Customer 6', 3, 'Agent 3', 1, 'Company 1', 'CMP1', 'POL-2025-006', 20000.00, 8000.00, 10000.00, 18000.00, 'premium_pct', 16.0000, 3200.00, 'premium_pct', 11.0000, 2200.00, DATE_SUB(CURDATE(), INTERVAL 75 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 75 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 70 DAY), 2, 7, 'VH-0007', 'Car', 7, 'Customer 7', NULL, NULL, 2, 'Company 2', 'CMP2', 'POL-2025-007', 10000.00, 3500.00, 5500.00, 9000.00, 'premium_pct', 15.0000, 1500.00, NULL, NULL, 0.00, DATE_SUB(CURDATE(), INTERVAL 70 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 70 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 65 DAY), 3, 8, 'VH-0008', 'Two Wheeler', 8, 'Customer 8', 1, 'Agent 1', 3, 'Company 3', 'CMP3', 'POL-2025-008', 5000.00, 2000.00, 2500.00, 4500.00, 'premium_pct', 12.0000, 600.00, 'premium_pct', 8.0000, 400.00, DATE_SUB(CURDATE(), INTERVAL 65 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 65 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 60 DAY), 4, 9, 'VH-0009', 'Commercial', 9, 'Customer 9', 2, 'Agent 2', 4, 'Company 4', 'CMP4', 'POL-2025-009', 25000.00, 10000.00, 12000.00, 22000.00, 'premium_pct', 17.0000, 4250.00, 'premium_pct', 12.0000, 3000.00, DATE_SUB(CURDATE(), INTERVAL 60 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 60 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 55 DAY), 5, 10, 'VH-0010', 'Car', 10, 'Customer 10', 3, 'Agent 3', 5, 'Company 5', 'CMP5', 'POL-2025-010', 15000.00, 5000.00, 8000.00, 13000.00, 'premium_pct', 14.0000, 2100.00, 'premium_pct', 10.0000, 1500.00, DATE_SUB(CURDATE(), INTERVAL 55 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 55 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 50 DAY), 1, 11, 'VH-0011', 'Two Wheeler', 11, 'Customer 11', 1, 'Agent 1', 1, 'Company 1', 'CMP1', 'POL-2025-011', 8000.00, 3000.00, 4000.00, 7000.00, 'premium_pct', 13.0000, 1040.00, 'premium_pct', 9.0000, 720.00, DATE_SUB(CURDATE(), INTERVAL 50 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 50 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 45 DAY), 2, 12, 'VH-0012', 'Commercial', 12, 'Customer 12', NULL, NULL, 2, 'Company 2', 'CMP2', 'POL-2025-012', 20000.00, 8000.00, 10000.00, 18000.00, 'premium_pct', 16.0000, 3200.00, NULL, NULL, 0.00, DATE_SUB(CURDATE(), INTERVAL 45 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 45 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 40 DAY), 3, 13, 'VH-0013', 'Car', 13, 'Customer 13', 2, 'Agent 2', 3, 'Company 3', 'CMP3', 'POL-2025-013', 12000.00, 4000.00, 6500.00, 10500.00, 'premium_pct', 15.0000, 1800.00, 'premium_pct', 10.0000, 1200.00, DATE_SUB(CURDATE(), INTERVAL 40 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 40 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 35 DAY), 4, 14, 'VH-0014', 'Two Wheeler', 14, 'Customer 14', 3, 'Agent 3', 4, 'Company 4', 'CMP4', 'POL-2025-014', 5000.00, 2000.00, 2500.00, 4500.00, 'premium_pct', 12.0000, 600.00, 'premium_pct', 8.0000, 400.00, DATE_SUB(CURDATE(), INTERVAL 35 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 35 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 30 DAY), 5, 15, 'VH-0015', 'Commercial', 15, 'Customer 15', 1, 'Agent 1', 5, 'Company 5', 'CMP5', 'POL-2025-015', 25000.00, 10000.00, 12000.00, 22000.00, 'premium_pct', 18.0000, 4500.00, 'premium_pct', 12.0000, 3000.00, DATE_SUB(CURDATE(), INTERVAL 30 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 30 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 25 DAY), 1, 16, 'VH-0016', 'Car', 16, 'Customer 16', 2, 'Agent 2', 1, 'Company 1', 'CMP1', 'POL-2025-016', 10000.00, 3500.00, 5500.00, 9000.00, 'premium_pct', 14.0000, 1400.00, 'premium_pct', 9.0000, 900.00, DATE_SUB(CURDATE(), INTERVAL 25 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 25 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 20 DAY), 2, 17, 'VH-0017', 'Two Wheeler', 17, 'Customer 17', 3, 'Agent 3', 2, 'Company 2', 'CMP2', 'POL-2025-017', 8000.00, 3000.00, 4000.00, 7000.00, 'premium_pct', 13.0000, 1040.00, 'premium_pct', 8.0000, 640.00, DATE_SUB(CURDATE(), INTERVAL 20 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 20 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 15 DAY), 3, 18, 'VH-0018', 'Commercial', 18, 'Customer 18', NULL, NULL, 3, 'Company 3', 'CMP3', 'POL-2025-018', 20000.00, 8000.00, 10000.00, 18000.00, 'premium_pct', 17.0000, 3400.00, NULL, NULL, 0.00, DATE_SUB(CURDATE(), INTERVAL 15 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 15 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 10 DAY), 4, 19, 'VH-0019', 'Car', 19, 'Customer 19', 1, 'Agent 1', 4, 'Company 4', 'CMP4', 'POL-2025-019', 15000.00, 5000.00, 8000.00, 13000.00, 'premium_pct', 15.0000, 2250.00, 'premium_pct', 10.0000, 1500.00, DATE_SUB(CURDATE(), INTERVAL 10 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 10 DAY), INTERVAL 1 YEAR), 'active', 1),
-        (DATE_SUB(CURDATE(), INTERVAL 5 DAY), 5, 20, 'VH-0020', 'Two Wheeler', 20, 'Customer 20', 2, 'Agent 2', 5, 'Company 5', 'CMP5', 'POL-2025-020', 5000.00, 2000.00, 2500.00, 4500.00, 'premium_pct', 12.0000, 600.00, 'premium_pct', 8.0000, 400.00, DATE_SUB(CURDATE(), INTERVAL 5 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 5 DAY), INTERVAL 1 YEAR), 'active', 1)");
+        (DATE_SUB(CURDATE(), INTERVAL 100 DAY), 1, 1, 'VH-0001', 'Car', 1, 'Customer 1', 1, 'Agent 1', 'Company 1', 'CMP1', 'POL-2025-001', 15000.00, 5000.00, 8000.00, 13000.00, DATE_SUB(CURDATE(), INTERVAL 100 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 100 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 95 DAY), 2, 2, 'VH-0002', 'Two Wheeler', 2, 'Customer 2', 2, 'Agent 2', 'Company 2', 'CMP2', 'POL-2025-002', 5000.00, 2000.00, 2500.00, 4500.00, DATE_SUB(CURDATE(), INTERVAL 95 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 95 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 90 DAY), 3, 3, 'VH-0003', 'Commercial', 3, 'Customer 3', 3, 'Agent 3', 'Company 3', 'CMP3', 'POL-2025-003', 25000.00, 10000.00, 12000.00, 22000.00, DATE_SUB(CURDATE(), INTERVAL 90 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 90 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 85 DAY), 4, 4, 'VH-0004', 'Car', 4, 'Customer 4', 1, 'Agent 1', 'Company 4', 'CMP4', 'POL-2025-004', 12000.00, 4000.00, 6500.00, 10500.00, DATE_SUB(CURDATE(), INTERVAL 85 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 85 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 80 DAY), 5, 5, 'VH-0005', 'Two Wheeler', 5, 'Customer 5', 2, 'Agent 2', 'Company 5', 'CMP5', 'POL-2025-005', 8000.00, 3000.00, 4000.00, 7000.00, DATE_SUB(CURDATE(), INTERVAL 80 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 80 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 75 DAY), 1, 6, 'VH-0006', 'Commercial', 6, 'Customer 6', 3, 'Agent 3', 'Company 1', 'CMP1', 'POL-2025-006', 20000.00, 8000.00, 10000.00, 18000.00, DATE_SUB(CURDATE(), INTERVAL 75 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 75 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 70 DAY), 2, 7, 'VH-0007', 'Car', 7, 'Customer 7', NULL, NULL, 'Company 2', 'CMP2', 'POL-2025-007', 10000.00, 3500.00, 5500.00, 9000.00, DATE_SUB(CURDATE(), INTERVAL 70 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 70 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 65 DAY), 3, 8, 'VH-0008', 'Two Wheeler', 8, 'Customer 8', 1, 'Agent 1', 'Company 3', 'CMP3', 'POL-2025-008', 5000.00, 2000.00, 2500.00, 4500.00, DATE_SUB(CURDATE(), INTERVAL 65 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 65 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 60 DAY), 4, 9, 'VH-0009', 'Commercial', 9, 'Customer 9', 2, 'Agent 2', 'Company 4', 'CMP4', 'POL-2025-009', 25000.00, 10000.00, 12000.00, 22000.00, DATE_SUB(CURDATE(), INTERVAL 60 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 60 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 55 DAY), 5, 10, 'VH-0010', 'Car', 10, 'Customer 10', 3, 'Agent 3', 'Company 5', 'CMP5', 'POL-2025-010', 15000.00, 5000.00, 8000.00, 13000.00, DATE_SUB(CURDATE(), INTERVAL 55 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 55 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 50 DAY), 1, 11, 'VH-0011', 'Two Wheeler', 11, 'Customer 11', 1, 'Agent 1', 'Company 1', 'CMP1', 'POL-2025-011', 8000.00, 3000.00, 4000.00, 7000.00, DATE_SUB(CURDATE(), INTERVAL 50 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 50 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 45 DAY), 2, 12, 'VH-0012', 'Commercial', 12, 'Customer 12', NULL, NULL, 'Company 2', 'CMP2', 'POL-2025-012', 20000.00, 8000.00, 10000.00, 18000.00, DATE_SUB(CURDATE(), INTERVAL 45 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 45 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 40 DAY), 3, 13, 'VH-0013', 'Car', 13, 'Customer 13', 2, 'Agent 2', 'Company 3', 'CMP3', 'POL-2025-013', 12000.00, 4000.00, 6500.00, 10500.00, DATE_SUB(CURDATE(), INTERVAL 40 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 40 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 35 DAY), 4, 14, 'VH-0014', 'Two Wheeler', 14, 'Customer 14', 3, 'Agent 3', 'Company 4', 'CMP4', 'POL-2025-014', 5000.00, 2000.00, 2500.00, 4500.00, DATE_SUB(CURDATE(), INTERVAL 35 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 35 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 30 DAY), 5, 15, 'VH-0015', 'Commercial', 15, 'Customer 15', 1, 'Agent 1', 'Company 5', 'CMP5', 'POL-2025-015', 25000.00, 10000.00, 12000.00, 22000.00, DATE_SUB(CURDATE(), INTERVAL 30 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 30 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 25 DAY), 1, 16, 'VH-0016', 'Car', 16, 'Customer 16', 2, 'Agent 2', 'Company 1', 'CMP1', 'POL-2025-016', 10000.00, 3500.00, 5500.00, 9000.00, DATE_SUB(CURDATE(), INTERVAL 25 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 25 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 20 DAY), 2, 17, 'VH-0017', 'Two Wheeler', 17, 'Customer 17', 3, 'Agent 3', 'Company 2', 'CMP2', 'POL-2025-017', 8000.00, 3000.00, 4000.00, 7000.00, DATE_SUB(CURDATE(), INTERVAL 20 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 20 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 15 DAY), 3, 18, 'VH-0018', 'Commercial', 18, 'Customer 18', NULL, NULL, 'Company 3', 'CMP3', 'POL-2025-018', 20000.00, 8000.00, 10000.00, 18000.00, DATE_SUB(CURDATE(), INTERVAL 15 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 15 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 10 DAY), 4, 19, 'VH-0019', 'Car', 19, 'Customer 19', 1, 'Agent 1', 'Company 4', 'CMP4', 'POL-2025-019', 15000.00, 5000.00, 8000.00, 13000.00, DATE_SUB(CURDATE(), INTERVAL 10 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 10 DAY), INTERVAL 1 YEAR), 'active', 1),
+        (DATE_SUB(CURDATE(), INTERVAL 5 DAY), 5, 20, 'VH-0020', 'Two Wheeler', 20, 'Customer 20', 2, 'Agent 2', 'Company 5', 'CMP5', 'POL-2025-020', 5000.00, 2000.00, 2500.00, 4500.00, DATE_SUB(CURDATE(), INTERVAL 5 DAY), DATE_ADD(DATE_SUB(CURDATE(), INTERVAL 5 DAY), INTERVAL 1 YEAR), 'active', 1)");
     echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Seeded 20 policy entries</div>';
-
-    $conn->query("INSERT INTO buyer_payout_charts (buyer_id, vehicle_type, month, year, commission_basis, commission_rate, created_by) VALUES
-        (1, 'Car', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 15.0000, 1),
-        (1, 'Two Wheeler', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 12.0000, 1),
-        (1, 'Commercial', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 18.0000, 1),
-        (2, 'Car', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 14.0000, 1),
-        (2, 'Two Wheeler', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 11.0000, 1),
-        (2, 'Commercial', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 17.0000, 1),
-        (3, 'Car', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 15.0000, 1),
-        (3, 'Two Wheeler', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 12.0000, 1),
-        (3, 'Commercial', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 18.0000, 1),
-        (4, 'Car', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 13.0000, 1),
-        (4, 'Two Wheeler', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 10.0000, 1),
-        (4, 'Commercial', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 16.0000, 1),
-        (5, 'Car', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 14.0000, 1),
-        (5, 'Two Wheeler', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 11.0000, 1),
-        (5, 'Commercial', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 17.0000, 1),
-        (1, 'Car', MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), 'premium_pct', 14.0000, 1),
-        (1, 'Two Wheeler', MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), 'premium_pct', 11.0000, 1),
-        (2, 'Car', MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), 'premium_pct', 13.0000, 1),
-        (3, 'Commercial', MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), 'premium_pct', 17.0000, 1),
-        (4, 'Car', MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), 'premium_pct', 12.0000, 1)");
-    echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Seeded 20 buyer payout charts</div>';
-
-    $conn->query("INSERT INTO agent_payout_charts (agent_id, buyer_id, vehicle_type, month, year, commission_basis, commission_rate, is_custom, is_active, uploaded_via, created_by) VALUES
-        (NULL, NULL, 'Car', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 10.0000, 0, 1, 'manual', 1),
-        (NULL, NULL, 'Two Wheeler', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 8.0000, 0, 1, 'manual', 1),
-        (NULL, NULL, 'Commercial', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 12.0000, 0, 1, 'manual', 1),
-        (1, NULL, 'Car', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 12.0000, 1, 1, 'manual', 1),
-        (1, NULL, 'Two Wheeler', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 10.0000, 1, 1, 'manual', 1),
-        (1, NULL, 'Commercial', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 14.0000, 1, 1, 'manual', 1),
-        (2, NULL, 'Car', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 11.0000, 1, 1, 'manual', 1),
-        (2, NULL, 'Two Wheeler', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 9.0000, 1, 1, 'manual', 1),
-        (2, NULL, 'Commercial', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 13.0000, 1, 1, 'manual', 1),
-        (3, NULL, 'Car', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 10.0000, 1, 1, 'manual', 1),
-        (3, NULL, 'Two Wheeler', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 8.0000, 1, 1, 'manual', 1),
-        (3, NULL, 'Commercial', MONTH(CURDATE()), YEAR(CURDATE()), 'premium_pct', 12.0000, 1, 1, 'manual', 1),
-        (NULL, NULL, 'Car', MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), 'premium_pct', 9.0000, 0, 1, 'manual', 1),
-        (NULL, NULL, 'Two Wheeler', MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), 'premium_pct', 7.0000, 0, 1, 'manual', 1),
-        (NULL, NULL, 'Commercial', MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), 'premium_pct', 11.0000, 0, 1, 'manual', 1),
-        (1, NULL, 'Car', MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), 'premium_pct', 11.0000, 1, 1, 'manual', 1),
-        (1, NULL, 'Two Wheeler', MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), 'premium_pct', 9.0000, 1, 1, 'manual', 1),
-        (2, NULL, 'Car', MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), 'premium_pct', 10.0000, 1, 1, 'manual', 1),
-        (2, NULL, 'Commercial', MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), 'premium_pct', 12.0000, 1, 1, 'manual', 1),
-        (3, NULL, 'Commercial', MONTH(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), YEAR(DATE_SUB(CURDATE(), INTERVAL 1 MONTH)), 'premium_pct', 11.0000, 1, 1, 'manual', 1)");
-    echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Seeded 20 agent payout charts</div>';
 
     $conn->query("INSERT INTO bank_transactions (bank_account_id, transaction_date, description, reference_number, transaction_type, amount, running_balance, category, created_by) VALUES
         (1, DATE_SUB(CURDATE(), INTERVAL 20 DAY), 'Premium received for POL-2025-001', 'TXN-001', 'credit', 15000.00, 115000.00, 'policy_payment', 1),
@@ -1586,52 +1544,6 @@ function seedDemoData($conn)
         (3, DATE_SUB(CURDATE(), INTERVAL 2 DAY), 'Premium received for POL-2025-013', 'TXN-019', 'credit', 12000.00, 104000.00, 'policy_payment', 1),
         (1, DATE_SUB(CURDATE(), INTERVAL 1 DAY), 'Stationery purchase', 'TXN-020', 'debit', 2000.00, 117750.00, 'expense', 1)");
     echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Seeded 20 bank transactions</div>';
-
-    $conn->query("INSERT INTO agent_transactions (agent_id, transaction_date, description, transaction_type, credit_amount, debit_amount, running_balance, payment_mode, reference_number, created_by) VALUES
-        (1, DATE_SUB(CURDATE(), INTERVAL 18 DAY), 'Commission for POL-2025-001', 'commission', 1500.00, 0.00, 1500.00, NULL, NULL, 1),
-        (1, DATE_SUB(CURDATE(), INTERVAL 16 DAY), 'Commission for POL-2025-004', 'commission', 1200.00, 0.00, 2700.00, NULL, NULL, 1),
-        (1, DATE_SUB(CURDATE(), INTERVAL 14 DAY), 'Payment to Agent 1', 'payment_out', 0.00, 2000.00, 700.00, 'NEFT', 'PAY-001', 1),
-        (1, DATE_SUB(CURDATE(), INTERVAL 12 DAY), 'Commission for POL-2025-008', 'commission', 400.00, 0.00, 1100.00, NULL, NULL, 1),
-        (1, DATE_SUB(CURDATE(), INTERVAL 10 DAY), 'Commission for POL-2025-011', 'commission', 720.00, 0.00, 1820.00, NULL, NULL, 1),
-        (1, DATE_SUB(CURDATE(), INTERVAL 8 DAY), 'Commission for POL-2025-015', 'commission', 3000.00, 0.00, 4820.00, NULL, NULL, 1),
-        (1, DATE_SUB(CURDATE(), INTERVAL 5 DAY), 'Payment to Agent 1', 'payment_out', 0.00, 3000.00, 1820.00, 'NEFT', 'PAY-004', 1),
-        (2, DATE_SUB(CURDATE(), INTERVAL 17 DAY), 'Commission for POL-2025-002', 'commission', 400.00, 0.00, 400.00, NULL, NULL, 1),
-        (2, DATE_SUB(CURDATE(), INTERVAL 15 DAY), 'Commission for POL-2025-005', 'commission', 720.00, 0.00, 1120.00, NULL, NULL, 1),
-        (2, DATE_SUB(CURDATE(), INTERVAL 13 DAY), 'Payment to Agent 2', 'payment_out', 0.00, 500.00, 620.00, 'Cash', 'PAY-002', 1),
-        (2, DATE_SUB(CURDATE(), INTERVAL 11 DAY), 'Commission for POL-2025-009', 'commission', 3000.00, 0.00, 3620.00, NULL, NULL, 1),
-        (2, DATE_SUB(CURDATE(), INTERVAL 9 DAY), 'Commission for POL-2025-013', 'commission', 1200.00, 0.00, 4820.00, NULL, NULL, 1),
-        (2, DATE_SUB(CURDATE(), INTERVAL 7 DAY), 'Payment to Agent 2', 'payment_out', 0.00, 2000.00, 2820.00, 'NEFT', 'PAY-005', 1),
-        (2, DATE_SUB(CURDATE(), INTERVAL 4 DAY), 'Commission for POL-2025-016', 'commission', 900.00, 0.00, 3720.00, NULL, NULL, 1),
-        (3, DATE_SUB(CURDATE(), INTERVAL 16 DAY), 'Commission for POL-2025-003', 'commission', 3000.00, 0.00, 3000.00, NULL, NULL, 1),
-        (3, DATE_SUB(CURDATE(), INTERVAL 14 DAY), 'Commission for POL-2025-006', 'commission', 2200.00, 0.00, 5200.00, NULL, NULL, 1),
-        (3, DATE_SUB(CURDATE(), INTERVAL 12 DAY), 'Payment to Agent 3', 'payment_out', 0.00, 3000.00, 2200.00, 'NEFT', 'PAY-003', 1),
-        (3, DATE_SUB(CURDATE(), INTERVAL 10 DAY), 'Commission for POL-2025-010', 'commission', 1500.00, 0.00, 3700.00, NULL, NULL, 1),
-        (3, DATE_SUB(CURDATE(), INTERVAL 8 DAY), 'Commission for POL-2025-014', 'commission', 400.00, 0.00, 4100.00, NULL, NULL, 1),
-        (3, DATE_SUB(CURDATE(), INTERVAL 6 DAY), 'Commission for POL-2025-017', 'commission', 640.00, 0.00, 4740.00, NULL, NULL, 1)");
-    echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Seeded 20 agent transactions</div>';
-
-    $conn->query("INSERT INTO buyer_transactions (buyer_id, transaction_date, description, transaction_type, credit_amount, debit_amount, running_balance, payment_mode, reference_number, created_by) VALUES
-        (1, DATE_SUB(CURDATE(), INTERVAL 18 DAY), 'Commission for POL-2025-001', 'commission_receivable', 2250.00, 0.00, 2250.00, NULL, NULL, 1),
-        (1, DATE_SUB(CURDATE(), INTERVAL 15 DAY), 'Payment received from Company 1', 'payment_received', 0.00, 2000.00, 250.00, 'NEFT', 'RCV-001', 1),
-        (1, DATE_SUB(CURDATE(), INTERVAL 10 DAY), 'Commission for POL-2025-011', 'commission_receivable', 1040.00, 0.00, 1290.00, NULL, NULL, 1),
-        (1, DATE_SUB(CURDATE(), INTERVAL 6 DAY), 'Commission for POL-2025-016', 'commission_receivable', 1400.00, 0.00, 2690.00, NULL, NULL, 1),
-        (2, DATE_SUB(CURDATE(), INTERVAL 17 DAY), 'Commission for POL-2025-002', 'commission_receivable', 600.00, 0.00, 600.00, NULL, NULL, 1),
-        (2, DATE_SUB(CURDATE(), INTERVAL 13 DAY), 'Commission for POL-2025-007', 'commission_receivable', 1500.00, 0.00, 2100.00, NULL, NULL, 1),
-        (2, DATE_SUB(CURDATE(), INTERVAL 9 DAY), 'Commission for POL-2025-012', 'commission_receivable', 3200.00, 0.00, 5300.00, NULL, NULL, 1),
-        (2, DATE_SUB(CURDATE(), INTERVAL 5 DAY), 'Payment received from Company 2', 'payment_received', 0.00, 3000.00, 2300.00, 'NEFT', 'RCV-002', 1),
-        (2, DATE_SUB(CURDATE(), INTERVAL 3 DAY), 'Commission for POL-2025-017', 'commission_receivable', 1040.00, 0.00, 3340.00, NULL, NULL, 1),
-        (3, DATE_SUB(CURDATE(), INTERVAL 16 DAY), 'Commission for POL-2025-003', 'commission_receivable', 4500.00, 0.00, 4500.00, NULL, NULL, 1),
-        (3, DATE_SUB(CURDATE(), INTERVAL 12 DAY), 'Payment received from Company 3', 'payment_received', 0.00, 4000.00, 500.00, 'Cash', 'RCV-003', 1),
-        (3, DATE_SUB(CURDATE(), INTERVAL 8 DAY), 'Commission for POL-2025-008', 'commission_receivable', 600.00, 0.00, 1100.00, NULL, NULL, 1),
-        (3, DATE_SUB(CURDATE(), INTERVAL 4 DAY), 'Commission for POL-2025-013', 'commission_receivable', 1800.00, 0.00, 2900.00, NULL, NULL, 1),
-        (3, DATE_SUB(CURDATE(), INTERVAL 2 DAY), 'Commission for POL-2025-018', 'commission_receivable', 3400.00, 0.00, 6300.00, NULL, NULL, 1),
-        (4, DATE_SUB(CURDATE(), INTERVAL 15 DAY), 'Commission for POL-2025-004', 'commission_receivable', 1680.00, 0.00, 1680.00, NULL, NULL, 1),
-        (4, DATE_SUB(CURDATE(), INTERVAL 11 DAY), 'Commission for POL-2025-009', 'commission_receivable', 4250.00, 0.00, 5930.00, NULL, NULL, 1),
-        (4, DATE_SUB(CURDATE(), INTERVAL 7 DAY), 'Commission for POL-2025-014', 'commission_receivable', 600.00, 0.00, 6530.00, NULL, NULL, 1),
-        (4, DATE_SUB(CURDATE(), INTERVAL 3 DAY), 'Payment received from Company 4', 'payment_received', 0.00, 5000.00, 1530.00, 'NEFT', 'RCV-004', 1),
-        (5, DATE_SUB(CURDATE(), INTERVAL 14 DAY), 'Commission for POL-2025-005', 'commission_receivable', 1040.00, 0.00, 1040.00, NULL, NULL, 1),
-        (5, DATE_SUB(CURDATE(), INTERVAL 9 DAY), 'Commission for POL-2025-010', 'commission_receivable', 2100.00, 0.00, 3140.00, NULL, NULL, 1)");
-    echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Seeded 20 buyer transactions</div>';
 
     $conn->query("INSERT INTO expenses (expense_category_id, branch_id, expense_date, description, amount, payment_mode, bank_account_id, reference_number, created_by) VALUES
         (1, 1, DATE_SUB(CURDATE(), INTERVAL 20 DAY), 'Staff salary for month', 5000.00, 'Bank Transfer', 1, 'EXP-001', 1),
@@ -1827,12 +1739,10 @@ function seedDemoHistory($conn)
 
     $cust = $conn->prepare("INSERT INTO customers (name, mobile, email, state, referral_code) VALUES (?, ?, ?, ?, ?)");
     $veh = $conn->prepare("INSERT INTO vehicles (vehicle_number, vehicle_type, make, model, year_of_manufacture, fuel_type, customer_id) VALUES (?, ?, ?, ?, ?, ?, ?)");
-    $pol = $conn->prepare("INSERT INTO policy_entries (entry_date, branch_id, vehicle_id, vehicle_number, vehicle_type, customer_id, customer_name, agent_id, agent_name, buyer_id, company_name, company_code, policy_number, total_premium_amount, tp_amount, od_amount, net_premium_amount, buyer_commission_basis, buyer_commission_rate, buyer_commission_amount, agent_commission_basis, agent_commission_rate, agent_commission_amount, policy_start_date, policy_end_date, status, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'premium_pct',?,?,'premium_pct',?,?,?,?,?,1)");
-    $agTx = $conn->prepare("INSERT INTO agent_transactions (agent_id, transaction_date, description, transaction_type, credit_amount, debit_amount, running_balance, reference_number, created_by) VALUES (?, ?, ?, 'commission', ?, 0, 0, ?, 1)");
-    $byTx = $conn->prepare("INSERT INTO buyer_transactions (buyer_id, transaction_date, description, transaction_type, credit_amount, debit_amount, running_balance, reference_number, created_by) VALUES (?, ?, ?, 'commission_receivable', ?, 0, 0, ?, 1)");
+    $pol = $conn->prepare("INSERT INTO policy_entries (entry_date, branch_id, vehicle_id, vehicle_number, vehicle_type, customer_id, customer_name, agent_id, agent_name, company_name, company_code, policy_number, total_premium_amount, tp_amount, od_amount, net_premium_amount, policy_start_date, policy_end_date, status, created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1)");
 
-    // one customer + vehicle + policy (+ commission ledger lines)
-    $add = function ($start, $status) use (&$n, $types, $tNames, $cust, $veh, $pol, $agTx, $byTx) {
+    // one customer + vehicle + policy
+    $add = function ($start, $status) use (&$n, $types, $tNames, $cust, $veh, $pol) {
         $n++;
         $type = $tNames[mt_rand(0, 2)];
         [$lo, $hi, $bRate, $aRate, $fuel] = $types[$type];
@@ -1856,8 +1766,6 @@ function seedDemoHistory($conn)
         $tp = round($total * 0.33 / 10) * 10;
         $od = round($total * 0.53 / 10) * 10;
         $net = $tp + $od;
-        $bAmt = round($total * $bRate / 100, 2);
-        $aAmt = round($total * $aRate / 100, 2);
         $branch = 1 + $n % 5;
         $aid = 1 + $n % 3;
         $aName = "Agent $aid";
@@ -1867,7 +1775,7 @@ function seedDemoHistory($conn)
         $polNo = 'POL-' . substr($start, 0, 4) . '-' . sprintf('%03d', $n);
         $end = date('Y-m-d', strtotime("$start +1 year"));
         $pol->bind_param(
-            'siissisisisssddddddddsss',
+            'siissisissssddddsss',
             $start,
             $branch,
             $vid,
@@ -1877,7 +1785,6 @@ function seedDemoHistory($conn)
             $name,
             $aid,
             $aName,
-            $bid,
             $comp,
             $code,
             $polNo,
@@ -1885,22 +1792,11 @@ function seedDemoHistory($conn)
             $tp,
             $od,
             $net,
-            $bRate,
-            $bAmt,
-            $aRate,
-            $aAmt,
             $start,
             $end,
             $status
         );
         $pol->execute();
-        if ($status === 'cancelled')
-            return;
-        $desc = "Commission for $polNo";
-        $agTx->bind_param('issds', $aid, $start, $desc, $aAmt, $polNo);
-        $agTx->execute();
-        $byTx->bind_param('issds', $bid, $start, $desc, $bAmt, $polNo);
-        $byTx->execute();
     };
 
     // last year's book: end dates from 4 weeks overdue to 2 months ahead
