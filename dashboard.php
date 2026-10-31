@@ -886,7 +886,7 @@ $branding = getBranding();
                     <!-- Row 3: Monthly Premium & Policy Status -->
                     <div class="dashboard-grid-2">
                         <div class="chart-card">
-                            <h3><i class="fas fa-chart-area"></i> Monthly Premium & Commission</h3>
+                            <h3><i class="fas fa-chart-area"></i> Monthly Premium Booked</h3>
                             <div class="chart-container">
                                 <canvas id="chartMonthlyPremium"></canvas>
                             </div>
@@ -951,13 +951,13 @@ $branding = getBranding();
                         </div>
                         <div class="data-section">
                             <div class="section-header">
-                                <h2><i class="fas fa-building"></i> Top 5 Buyers</h2>
+                                <h2><i class="fas fa-building-shield"></i> Top Insurance Companies</h2>
                             </div>
                             <table class="report-top-table">
                                 <thead>
                                     <tr>
                                         <th>#</th>
-                                        <th>Company</th>
+                                        <th>Insurance Company</th>
                                         <th>Policies</th>
                                         <th>Premium</th>
                                     </tr>
@@ -1310,7 +1310,7 @@ $branding = getBranding();
                     <!-- Row 3: Charts -->
                     <div class="dashboard-grid-3">
                         <div class="chart-card">
-                            <h3><i class="fas fa-chart-line"></i> My Monthly Commission</h3>
+                            <h3><i class="fas fa-chart-line"></i> Monthly Policies Managed</h3>
                             <div class="chart-container">
                                 <canvas id="chartAgentCommission"></canvas>
                             </div>
@@ -1569,10 +1569,10 @@ $branding = getBranding();
 
                         var key = $('#rangeSelect').val(), p = d.prev || {};
                         renderFocus(d, key, [
-                            dxTile('Policies booked', 'fa-file-signature', 'info', fmt(d.rangePolicyCount), '', dxDelta(d.rangePolicyCount, d.prev ? p.count : null, key)),
-                            dxMoney('Premium booked', 'fa-sack-dollar', 'ok', d.totalPremium, dxDelta(d.totalPremium, d.prev ? p.premium : null, key, true)),
+                            dxTile('Policies Managed', 'fa-shield-halved', 'info', fmt(d.rangePolicyCount), '', dxDelta(d.rangePolicyCount, d.prev ? p.count : null, key)),
+                            dxMoney('Premium Value', 'fa-sack-dollar', 'ok', d.totalPremium, dxDelta(d.totalPremium, d.prev ? p.premium : null, key, true)),
                             dxExpiring(d),
-                            dxMoney('Net margin', 'fa-scale-balanced', d.netMargin < 0 ? 'bad' : 'violet', d.netMargin, dxDelta(d.netMargin, d.prev ? p.netMargin : null, key, true))
+                            dxTile('Total Expired', 'fa-triangle-exclamation', 'bad', fmt(d.expiredPolicies || 0), 'Needs renewal follow-up')
                         ], (d.recentActivity || []).map(function (r) {
                             var t = actTone(r.action);
                             return { tone: t[0], icon: t[1], title: r.action, sub: [r.details, r.username].filter(Boolean).join(' · '), at: r.timestamp };
@@ -1624,7 +1624,7 @@ $branding = getBranding();
                         labels: (data || []).map(function (r) { return r.month; }),
                         datasets: [
                             {
-                                label: 'Premium',
+                                label: 'Premium Managed',
                                 data: (data || []).map(function (r) { return r.premium; }),
                                 borderColor: cNavy,
                                 backgroundColor: 'rgba(0,31,63,0.1)',
@@ -1632,24 +1632,6 @@ $branding = getBranding();
                                 tension: 0.4,
                                 pointRadius: 4,
                                 pointHoverRadius: 6
-                            },
-                            {
-                                label: 'Buyer Commission',
-                                data: (data || []).map(function (r) { return r.buyerComm; }),
-                                borderColor: cBlue,
-                                backgroundColor: 'rgba(0,116,217,0.1)',
-                                fill: false,
-                                tension: 0.4,
-                                pointRadius: 3
-                            },
-                            {
-                                label: 'Agent Commission',
-                                data: (data || []).map(function (r) { return r.agentComm; }),
-                                borderColor: cGreen,
-                                backgroundColor: 'rgba(52,168,83,0.1)',
-                                fill: false,
-                                tension: 0.4,
-                                pointRadius: 3
                             }
                         ]
                     },
@@ -1905,11 +1887,10 @@ $branding = getBranding();
 
                         var key = $('#agRangeSelect').val(), p = d.prev || {};
                         renderFocus(d, key, [
-                            dxTile('Policies booked', 'fa-file-signature', 'info', fmt(d.rangePolicyCount), '', dxDelta(d.rangePolicyCount, d.prev ? p.count : null, key)),
-                            dxMoney('My commission', 'fa-coins', 'ok', d.totalCommission, dxDelta(d.totalCommission, d.prev ? p.commission : null, key, true)),
+                            dxTile('Policies Managed', 'fa-shield-halved', 'info', fmt(d.rangePolicyCount), '', dxDelta(d.rangePolicyCount, d.prev ? p.count : null, key)),
+                            dxMoney('Total Premium', 'fa-sack-dollar', 'ok', d.totalPremium, dxDelta(d.totalPremium, d.prev ? p.premium : null, key, true)),
                             dxExpiring(d),
-                            dxMoney('Wallet balance', 'fa-wallet', d.walletBalance < 0 ? 'bad' : 'violet', d.walletBalance,
-                                d.outstandingBalance ? '<b>' + rsEsc(curShort(d.outstandingBalance).join('')) + '</b> outstanding' : '<span>Nothing outstanding</span>')
+                            dxTile('My Customers', 'fa-users', 'violet', fmt(d.totalCustomers), 'Client portfolios')
                         ], (d.feed || []).map(function (n) {
                             var t = NOTIF_TONE[n.type] || NOTIF_TONE.general;
                             return { tone: t[0], icon: t[1], title: n.title, sub: n.message, at: n.created_at };
@@ -1955,8 +1936,8 @@ $branding = getBranding();
                     data: {
                         labels: (data || []).map(function (r) { return r.month; }),
                         datasets: [{
-                            label: 'Commission',
-                            data: (data || []).map(function (r) { return r.commission; }),
+                            label: 'Policies Managed',
+                            data: (data || []).map(function (r) { return r.policies; }),
                             borderColor: cBlue,
                             backgroundColor: 'rgba(0,116,217,0.15)',
                             fill: true,
@@ -1966,6 +1947,14 @@ $branding = getBranding();
                             pointBackgroundColor: cBlue
                         }]
                     },
+                    options: {
+                        plugins: { legend: { display: false } },
+                        scales: {
+                            y: { beginAtZero: true, ticks: { precision: 0 } }
+                        }
+                    }
+                });
+            }
                     options: {
                         plugins: { tooltip: currencyTooltip, legend: { display: false } },
                         scales: {

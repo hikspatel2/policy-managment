@@ -622,7 +622,7 @@ if (isset($_GET['action'])) {
                 $buyerBasis = trim($_POST['buyer_commission_basis'] ?? '');
                 $buyerRate = (float)($_POST['buyer_commission_rate'] ?? 0);
                 $buyerCommAmt = (float)($_POST['buyer_commission_amount'] ?? 0);
-                if ($isAgent && empty($buyerBasis)) {
+                if (empty($buyerBasis)) {
                     $buyerBasis = 'fixed';
                     $buyerRate = 0.0;
                     $buyerCommAmt = 0.0;
@@ -716,10 +716,25 @@ if (isset($_GET['action'])) {
                     }
                 }
 
+                // auto-fill buyer / basis if not provided (pure policy management)
+                if (!$buyerId) {
+                    $bQ = $conn->query("SELECT id, company_name, company_code FROM buyers WHERE is_active = 1 LIMIT 1");
+                    if ($bQ && ($bRow = $bQ->fetch_assoc())) {
+                        $buyerId = (int)$bRow['id'];
+                    } else {
+                        $buyerId = 1;
+                    }
+                }
+                if (!$buyerBasis) {
+                    $buyerBasis = 'fixed';
+                    $buyerRate = 0.0;
+                    $buyerCommAmt = 0.0;
+                }
+
                 // validate required - presence checks (0 is a valid amount)
                 $totalPremiumRaw = $_POST['total_premium_amount'] ?? '';
                 $netPremiumRaw = $_POST['net_premium_amount'] ?? '';
-                if (!$entryDate || !$branchId || ($isMotor && !$vehicleId) || !$customerId || !$buyerId || !$policyNumber || trim((string)$totalPremiumRaw) === '' || trim((string)$netPremiumRaw) === '' || !$buyerBasis || !$policyStart || !$policyEnd) {
+                if (!$entryDate || !$branchId || ($isMotor && !$vehicleId) || !$customerId || !$policyNumber || trim((string)$totalPremiumRaw) === '' || trim((string)$netPremiumRaw) === '' || !$policyStart || !$policyEnd) {
                     echo json_encode(['success' => false, 'message' => 'Please fill all required fields']);
                     exit();
                 }
@@ -959,7 +974,7 @@ if (isset($_GET['action'])) {
                 $buyerBasis = trim($_POST['buyer_commission_basis'] ?? '');
                 $buyerRate = (float)($_POST['buyer_commission_rate'] ?? 0);
                 $buyerCommAmt = (float)($_POST['buyer_commission_amount'] ?? 0);
-                if ($isAgent && empty($buyerBasis)) {
+                if (empty($buyerBasis)) {
                     $buyerBasis = 'fixed';
                     $buyerRate = 0.0;
                     $buyerCommAmt = 0.0;
@@ -2142,9 +2157,9 @@ if ($isAdmin) {
                 </div>
                 <?php endif; ?>
                 <?php if (!$isCustomer): ?>
-                <div class="hf-field" title="Buyer"><label for="filterBuyer"><i class="fas fa-building"></i></label>
+                <div class="hf-field" title="Insurance Company"><label for="filterBuyer"><i class="fas fa-building-shield"></i></label>
                     <select id="filterBuyer" class="searchable">
-                        <option value="">All Buyers</option>
+                        <option value="">All Insurers</option>
                     </select>
                 </div>
                 <div class="hf-field" title="Branch"><label for="filterBranch"><i class="fas fa-code-branch"></i></label>
@@ -2443,11 +2458,11 @@ if ($isAdmin) {
 
                     <!-- Insurance Company -->
                     <div class="form-grid">
-                        <div class="form-section-title"><i class="fas fa-building"></i> Insurance Company</div>
+                        <div class="form-section-title"><i class="fas fa-building-shield"></i> Insurance Company</div>
                         <div class="form-group">
-                            <label><i class="fas fa-building"></i> Buyer *</label>
+                            <label><i class="fas fa-building-shield"></i> Insurance Provider *</label>
                             <select id="fBuyer" name="buyer_id" class="searchable" required>
-                                <option value="">Select Buyer</option>
+                                <option value="">Select Insurance Provider</option>
                             </select>
                         </div>
                         <div class="form-group">
@@ -2524,60 +2539,17 @@ if ($isAdmin) {
                         </div>
                     </div>
 
-                    <!-- Buyer Commission -->
-                    <div class="form-grid-3">
-                        <div class="form-section-title"><i class="fas fa-percentage"></i> Buyer Commission</div>
-                        <div class="form-group">
-                            <label><i class="fas fa-sliders-h"></i> Basis *</label>
-                            <select id="fBuyerBasis" name="buyer_commission_basis" class="searchable" required>
-                                <option value="">Select</option>
-                                <option value="premium_pct">Premium %</option>
-                                <option value="tp_pct">TP %</option>
-                                <option value="od_pct">OD %</option>
-                                <option value="net_pct">Net %</option>
-                                <option value="fixed">Fixed</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label><i class="fas fa-percent"></i> Rate *</label>
-                            <input type="number" id="fBuyerRate" name="buyer_commission_rate" required step="0.0001" min="0" placeholder="0.00">
-                        </div>
-                        <div class="form-group">
-                            <label><i class="fas fa-calculator"></i> Amount</label>
-                            <input type="number" id="fBuyerCommAmt" name="buyer_commission_amount" step="0.01" class="calculated-input" placeholder="Auto-calculated">
-                        </div>
+                    <!-- Commissions (Hidden: Not a sales brokerage platform) -->
+                    <div id="buyerCommSection" style="display:none;">
+                        <input type="hidden" id="fBuyerBasis" name="buyer_commission_basis" value="fixed">
+                        <input type="hidden" id="fBuyerRate" name="buyer_commission_rate" value="0.00">
+                        <input type="hidden" id="fBuyerCommAmt" name="buyer_commission_amount" value="0.00">
                     </div>
-
-                    <!-- Agent Commission -->
                     <div id="agentCommSection" style="display:none;">
-                        <div class="form-grid-3">
-                            <div class="form-section-title"><i class="fas fa-hand-holding-usd"></i> Agent Commission</div>
-                            <div class="form-group">
-                                <label><i class="fas fa-sliders-h"></i> Basis</label>
-                                <select id="fAgentBasis" name="agent_commission_basis" class="searchable">
-                                    <option value="">Select</option>
-                                    <option value="premium_pct">Premium %</option>
-                                    <option value="tp_pct">TP %</option>
-                                    <option value="od_pct">OD %</option>
-                                    <option value="net_pct">Net %</option>
-                                    <option value="fixed">Fixed</option>
-                                </select>
-                            </div>
-                            <div class="form-group">
-                                <label><i class="fas fa-percent"></i> Rate</label>
-                                <input type="number" id="fAgentRate" name="agent_commission_rate" step="0.0001" min="0" placeholder="0.00">
-                            </div>
-                            <div class="form-group">
-                                <label><i class="fas fa-calculator"></i> Amount</label>
-                                <input type="number" id="fAgentCommAmt" name="agent_commission_amount" step="0.01" class="calculated-input" placeholder="Auto-calculated">
-                            </div>
-                            <div class="form-group form-full-width">
-                                <div class="toggle-switch">
-                                    <input type="checkbox" id="fIsManual" name="is_commission_manual" class="toggle">
-                                    <label for="fIsManual">Manual Override (edit amount directly)</label>
-                                </div>
-                            </div>
-                        </div>
+                        <input type="hidden" id="fAgentBasis" name="agent_commission_basis" value="fixed">
+                        <input type="hidden" id="fAgentRate" name="agent_commission_rate" value="0.00">
+                        <input type="hidden" id="fAgentCommAmt" name="agent_commission_amount" value="0.00">
+                        <input type="hidden" id="fIsManual" name="is_commission_manual" value="0">
                     </div>
 
                     <!-- Payment -->
@@ -3028,7 +3000,7 @@ if ($isAdmin) {
             cols.push({ data: 'buyer_commission_basis', title: 'Buyer Comm Basis', visible: false, render: function(d){ return basisLbl[d]||d||'-'; } });
             cols.push({ data: 'buyer_commission_rate', title: 'Buyer Comm Rate', visible: false });
             cols.push({
-                data: 'buyer_commission_amount', title: 'Buyer Comm',
+                data: 'buyer_commission_amount', title: 'Buyer Comm', visible: false,
                 render: function(d){ return '<span class="wallet-amount wallet-positive">' + fmtAmt(d) + '</span>'; }
             });
             cols.push({
@@ -3036,7 +3008,7 @@ if ($isAdmin) {
                 render: function(d) { return d ? escapeHtml(d) : '<span class="text-muted">Direct</span>'; }
             });
             cols.push({
-                data: 'agent_commission_amount', title: 'Agent Comm',
+                data: 'agent_commission_amount', title: 'Agent Comm', visible: false,
                 render: function(d){ return '<span class="wallet-amount wallet-positive">' + fmtAmt(d) + '</span>'; }
             });
             cols.push({ data: 'payment_mode', title: 'Payment Mode', visible: false, render: function(d){ return d?escapeHtml(d):'-'; } });
@@ -4124,21 +4096,6 @@ if ($isAdmin) {
         html += '<tr><td class="vd-label"><i class="fas fa-file-invoice-dollar"></i> GST Amount</td><td class="vd-value">' + amt(p.gst_amount) + '</td>';
         html += '<td class="vd-label"><i class="fas fa-car"></i> IDV</td><td class="vd-value">' + (p.idv === null || p.idv === '' ? '-' : amt(p.idv)) + '</td></tr>';
         html += '<tr><td class="vd-label"><i class="fas fa-percent"></i> NCB</td><td class="vd-value">' + (p.ncb_percent === null || p.ncb_percent === '' ? '-' : (+p.ncb_percent) + '%') + '</td><td colspan="2"></td></tr>';
-        html += '</table>';
-        html += '<h4 style="margin:18px 0 8px;color:var(--navy-primary);"><i class="fas fa-percentage"></i> Commissions</h4>';
-        html += '<table class="view-detail-table">';
-        html += '<tr><td class="vd-label"><i class="fas fa-building"></i> Buyer Basis</td><td class="vd-value">' + (basisLbl[p.buyer_commission_basis] || h(p.buyer_commission_basis)) + '</td>';
-        html += '<td class="vd-label"><i class="fas fa-percent"></i> Buyer Rate</td><td class="vd-value">' + h(p.buyer_commission_rate) + '</td></tr>';
-        html += '<tr><td class="vd-label"><i class="fas fa-calculator"></i> Buyer Amount</td><td class="vd-value"><strong class="wallet-amount wallet-positive">' + amt(p.buyer_commission_amount) + '</strong></td>';
-        if (p.agent_id) {
-            html += '<td class="vd-label"><i class="fas fa-user-tie"></i> Agent Basis</td><td class="vd-value">' + (basisLbl[p.agent_commission_basis] || h(p.agent_commission_basis)) + '</td></tr>';
-            html += '<tr><td class="vd-label"><i class="fas fa-percent"></i> Agent Rate</td><td class="vd-value">' + h(p.agent_commission_rate) + '</td>';
-            html += '<td class="vd-label"><i class="fas fa-calculator"></i> Agent Amount</td><td class="vd-value"><strong class="wallet-amount wallet-positive">' + amt(p.agent_commission_amount) + '</strong></td></tr>';
-            html += '<tr><td class="vd-label"><i class="fas fa-hand-paper"></i> Manual Override</td><td class="vd-value">' + (parseInt(p.is_commission_manual) ? '<span class="status-badge status-active">Yes</span>' : 'No') + '</td>';
-            html += '<td colspan="2"></td></tr>';
-        } else {
-            html += '<td class="vd-label"><i class="fas fa-user-tie"></i> Agent</td><td class="vd-value">-</td></tr>';
-        }
         html += '</table>';
         html += '</div>';
 

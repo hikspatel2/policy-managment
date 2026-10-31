@@ -59,7 +59,7 @@ $sbGroup = function ($id, $label, array $items) use ($sbLink) {
          . '<ul class="sidebar-menu" id="' . $id . '">' . $sb_html . '</ul>';
 };
 
-// menu per role — same links each role saw before
+// menu per role — focused on policy portfolio management & renewal reminders
 if ($role === 'customer') {
     $sb_main = [
         ['dashboard.php', 'dashboard', 'fa-house', 'Customer Portal'],
@@ -74,10 +74,12 @@ if ($role === 'customer') {
 } elseif ($sb_staff) {
     $sb_main = [
         ['dashboard.php', 'dashboard', 'fa-chart-line', 'Dashboard'],
-        ['policy_entries.php', 'policies', 'fa-file-invoice', 'Policy Entry'],
+        ['policy_upload.php', 'policy_upload', 'fa-file-arrow-up', 'Upload & Scan Policy'],
+        ['policy_entries.php', 'policies', 'fa-shield-halved', 'Policy Management'],
+        ['customer_followups.php', 'customer_followups', 'fa-headset', 'Expiry & Reminders'],
+        ['customers.php', 'customers', 'fa-users', 'Customers & Families'],
         ['vehicles.php', 'vehicles', 'fa-car', 'Vehicle List'],
-        ['claims.php', 'claims', 'fa-car-burst', 'Claims', 'claims', $sb_badges['claims']],
-        ['referrals.php', 'referrals', 'fa-gift', 'Referrals & Points'],
+        ['claims.php', 'claims', 'fa-car-burst', 'Claims & Support', 'claims', $sb_badges['claims']],
         ['notifications.php', 'notifications', 'fa-bell', 'Notifications', 'notif', $sb_badges['notif']],
         ['todo.php', 'todo', 'fa-tasks', 'To Do Work', 'todo', $sb_badges['todo']],
     ];
@@ -85,47 +87,28 @@ if ($role === 'customer') {
         ['agents-submenu', 'Agents', [
             ['agents.php', 'agents', 'fa-user-tie', 'Agent List'],
             ['agent_plans.php', 'agent_plans', 'fa-crown', 'Subscription Plans'],
-            ['customer_followups.php', 'customer_followups', 'fa-headset', 'Renewal Follow-ups'],
             ['support_tickets.php', 'support_tickets', 'fa-circle-question', 'Support Tickets'],
-            ['agent_transactions.php', 'agent_transactions', 'fa-receipt', 'Agent Accounts'],
         ]],
-        ['buyers-submenu', 'Buyers', [
-            ['buyers.php', 'buyers', 'fa-building', 'Buyer List'],
-            ['buyer_transactions.php', 'buyer_transactions', 'fa-receipt', 'Buyer Accounts'],
-        ]],
-        ['accounting-submenu', 'Accounting', [
-            ['branches.php', 'branches', 'fa-code-branch', 'Branch List'],
-            ['customers.php', 'customers', 'fa-address-book', 'Customer List'],
-            ['bank_accounts.php', 'bank_accounts', 'fa-university', 'Our Accounts'],
-            ['bank_transactions.php', 'bank_transactions', 'fa-file-invoice-dollar', 'Bank Statement'],
-            ['expenses.php', 'expenses', 'fa-money-bill-wave', 'Expenses', 'exp', $sb_badges['exp']],
-            ['other_income.php', 'other_income', 'fa-coins', 'Other Income'],
-        ]],
-        ['payout-submenu', 'Payout', [
-            ['buyer_payout_charts.php', 'buyer_payouts', 'fa-chart-bar', 'Buyer Payout'],
-            ['agent_payout_charts.php', 'agent_payouts', 'fa-hand-holding-usd', 'Agent Payout'],
-        ]],
-        ['reports-submenu', 'Reports', [
-            ['reports.php', 'reports', 'fa-chart-pie', 'Dashboard Reports'],
+        ['reports-submenu', 'Reports & Logs', [
+            ['reports.php', 'reports', 'fa-chart-pie', 'Policy & Expiry Reports'],
             ['logs.php', 'logs', 'fa-history', 'Activity Logs'],
         ]],
     ];
-    if ($role === 'admin') $sb_groups[] = ['system-submenu', 'System', [
+    if ($role === 'admin') $sb_groups[] = ['system-submenu', 'System Settings', [
         ['users.php', 'users', 'fa-users-cog', 'User Management'],
+        ['branches.php', 'branches', 'fa-code-branch', 'Branch List'],
         ['settings.php', 'settings', 'fa-cog', 'Settings'],
     ]];
 } else {
     $sb_main = [
         ['dashboard.php', 'dashboard', 'fa-chart-line', 'Agent Dashboard'],
         ['policy_upload.php', 'policy_upload', 'fa-file-arrow-up', 'Upload & Scan Policy'],
-        ['policy_entries.php', 'policies', 'fa-file-invoice', 'My Policies'],
-        ['customer_followups.php', 'customer_followups', 'fa-headset', 'Renewal Follow-ups'],
-        ['customers.php', 'customers', 'fa-users', 'My Customers'],
+        ['policy_entries.php', 'policies', 'fa-shield-halved', 'Client Policies'],
+        ['customer_followups.php', 'customer_followups', 'fa-headset', 'Expiry & Reminders'],
+        ['customers.php', 'customers', 'fa-users', 'My Customers & Families'],
         ['claims.php', 'claims', 'fa-car-burst', 'My Claims', 'claims', $sb_badges['claims']],
         ['vehicles.php', 'vehicles', 'fa-car', 'My Vehicles'],
         ['agents.php', 'agents', 'fa-id-card', 'My Profile'],
-        ['agent_payout_charts.php', 'agent_payouts', 'fa-hand-holding-usd', 'My Payout Chart'],
-        ['agent_transactions.php', 'agent_transactions', 'fa-receipt', 'My Account Statement'],
         ['notifications.php', 'notifications', 'fa-bell', 'Notifications', 'notif', $sb_badges['notif']],
     ];
     $sb_groups = [
@@ -1108,16 +1091,16 @@ window.rsOverlay = function (label) {
     var key = 'ai_tour_<?php echo (int)$user_id; ?>';
     try { if (localStorage.getItem(key)) return; } catch (e) { return; }
     var steps = <?php echo json_encode($sb_staff ? [
-        ['fa-chart-line', 'Dashboard', 'Premium at risk, this period\'s numbers and the policies that need you today.'],
-        ['fa-file-invoice', 'Policies', 'Add, renew and print policies. Documents, endorsements, claims and WhatsApp reminders live inside each policy.'],
+        ['fa-chart-line', 'Dashboard', 'Total policies under management, upcoming expirations, and active renewals.'],
+        ['fa-file-shield', 'Policies', 'Upload, scan and manage client policies. Documents and automated WhatsApp expiry reminders live inside each policy.'],
         ['fa-car-burst', 'Claims', 'Follow every claim from intimation to settlement. The sidebar count shows the open ones.'],
-        ['fa-user-tie', 'Agents & Buyers', 'Commissions post to their ledgers on their own, and payments link to your bank accounts.'],
-        ['fa-chart-pie', 'Reports', 'Renewals, customer dues, commissions and profit. Print or export any list.'],
+        ['fa-user-tie', 'Agents & Customers', 'Manage agents, customers, and client family policy portfolios effortlessly.'],
+        ['fa-chart-pie', 'Reports', 'Track policy expirations, renewal follow-ups, and portfolio metrics. Export any list easily.'],
     ] : [
-        ['fa-id-card', 'My Profile', 'Your details, licence and commission balance in one place.'],
-        ['fa-file-invoice', 'My Policies', 'Your policies with documents and a one-tap WhatsApp renewal reminder.'],
-        ['fa-car-burst', 'My Claims', 'Report a claim for your customer and follow it to settlement.'],
-        ['fa-receipt', 'My Statement', 'Every commission and payment on your account, ready to print.'],
+        ['fa-id-card', 'My Profile', 'Your agent profile and active subscription status.'],
+        ['fa-file-shield', 'My Policies', 'Your managed client policies with documents and one-tap WhatsApp renewal reminders.'],
+        ['fa-headset', 'Renewal Reminders', 'Automated WhatsApp and Email reminders for upcoming policy expirations.'],
+        ['fa-car-burst', 'My Claims', 'Report a claim for your customer and track it to settlement.'],
     ], JSON_HEX_TAG | JSON_HEX_APOS); ?>;
     function open() {
         if (document.querySelector('.modal-overlay.active')) return; // a page pop-up opened first — next visit

@@ -1198,10 +1198,14 @@ function setupColumnFixups($conn)
     @$conn->query("ALTER TABLE reminder_schedules MODIFY COLUMN agent_id BIGINT NULL");
     @$conn->query("ALTER TABLE customer_followups MODIFY COLUMN agent_id BIGINT NULL");
 
-    // Make vehicle fields nullable for non-motor policies
+    // Make vehicle and commission fields nullable / defaulted for pure policy management
     @$conn->query("ALTER TABLE policy_entries MODIFY COLUMN vehicle_id BIGINT NULL");
     @$conn->query("ALTER TABLE policy_entries MODIFY COLUMN vehicle_number VARCHAR(20) NULL");
     @$conn->query("ALTER TABLE policy_entries MODIFY COLUMN vehicle_type VARCHAR(50) NULL");
+    @$conn->query("ALTER TABLE policy_entries MODIFY COLUMN buyer_id BIGINT NULL");
+    @$conn->query("ALTER TABLE policy_entries MODIFY COLUMN buyer_commission_basis VARCHAR(50) NULL DEFAULT 'fixed'");
+    @$conn->query("ALTER TABLE policy_entries MODIFY COLUMN buyer_commission_rate DECIMAL(8,4) NULL DEFAULT 0.0000");
+    @$conn->query("ALTER TABLE policy_entries MODIFY COLUMN buyer_commission_amount DECIMAL(12,2) NULL DEFAULT 0.00");
 
     addIndexIfNotExists($conn, 'policy_entries', 'idx_insurance_category', 'insurance_category');
     addIndexIfNotExists($conn, 'claims', 'idx_claim_category', 'claim_category');
