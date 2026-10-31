@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 /**
  * Developed by Rudees Digital
  * Website: https://rudeesdigital.com
@@ -66,7 +66,7 @@ if (isset($_GET['action'])) {
 
                 $sql = "SELECT bt.*, ba.bank_name, ba.account_number,
                         (SELECT name FROM agents WHERE id = bt.agent_id) as linked_agent_name,
-                        (SELECT company_name FROM buyers WHERE id = bt.buyer_id) as linked_buyer_name
+                        NULL as linked_buyer_name
                         FROM bank_transactions bt
                         JOIN bank_accounts ba ON bt.bank_account_id = ba.id";
                 if ($bankFilter > 0) {
@@ -556,8 +556,7 @@ $linkAgents = []; $linkBuyers = [];
 $cxnLP = getDBConnection();
 $rsA = $cxnLP->query("SELECT id, name, agent_code FROM agents WHERE is_active = 1 ORDER BY name");
 if ($rsA) { while ($ar = $rsA->fetch_assoc()) $linkAgents[] = $ar; }
-$rsB = $cxnLP->query("SELECT id, company_name, company_code FROM buyers WHERE is_active = 1 ORDER BY company_name");
-if ($rsB) { while ($br = $rsB->fetch_assoc()) $linkBuyers[] = $br; }
+$linkBuyers = function_exists('getInsuranceCompaniesList') ? getInsuranceCompaniesList($cxnLP) : [];
 $cxnLP->close();
 ?>
 <!--

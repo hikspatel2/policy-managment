@@ -215,25 +215,94 @@ function recalcAgentBalances($conn, $agentId) {
 // buyers: wallet_balance = Σcredit − Σdebit ; outstanding_balance = same ; rewrites running_balance per row
 function recalcBuyerBalances($conn, $buyerId) {
     $buyerId = (int)$buyerId;
-    $bal = 0.00;
-    $stmt = $conn->prepare("SELECT id, credit_amount, debit_amount FROM buyer_transactions WHERE buyer_id = ? ORDER BY transaction_date ASC, id ASC");
-    $stmt->bind_param("i", $buyerId);
-    $stmt->execute();
-    $rows = $stmt->get_result();
-    $upd = $conn->prepare("UPDATE buyer_transactions SET running_balance = ? WHERE id = ?");
-    while ($r = $rows->fetch_assoc()) {
-        $bal += (float)$r['credit_amount'] - (float)$r['debit_amount'];
-        $rid = (int)$r['id'];
-        $upd->bind_param("di", $bal, $rid);
-        $upd->execute();
+    if ($buyerId <= 0) return 0.00;
+    try {
+        $chk = $conn->query("SHOW TABLES LIKE 'buyer_transactions'");
+        if (!$chk || $chk->num_rows === 0) return 0.00;
+        $bal = 0.00;
+        $stmt = $conn->prepare("SELECT id, credit_amount, debit_amount FROM buyer_transactions WHERE buyer_id = ? ORDER BY transaction_date ASC, id ASC");
+        if (!$stmt) return 0.00;
+        $stmt->bind_param("i", $buyerId);
+        $stmt->execute();
+        $rows = $stmt->get_result();
+        $upd = $conn->prepare("UPDATE buyer_transactions SET running_balance = ? WHERE id = ?");
+        while ($r = $rows->fetch_assoc()) {
+            $bal += (float)$r['credit_amount'] - (float)$r['debit_amount'];
+            $rid = (int)$r['id'];
+            $upd->bind_param("di", $bal, $rid);
+            $upd->execute();
+        }
+        $stmt->close();
+        $upd->close();
+        $b = $conn->prepare("UPDATE buyers SET wallet_balance = ?, outstanding_balance = ? WHERE id = ?");
+        if ($b) {
+            $b->bind_param("ddi", $bal, $bal, $buyerId);
+            $b->execute();
+            $b->close();
+        }
+        return $bal;
+    } catch (\Throwable $e) {
+        return 0.00;
     }
-    $stmt->close();
-    $upd->close();
-    $b = $conn->prepare("UPDATE buyers SET wallet_balance = ?, outstanding_balance = ? WHERE id = ?");
-    $b->bind_param("ddi", $bal, $bal, $buyerId);
-    $b->execute();
-    $b->close();
-    return $bal;
+}
+
+// Master list of insurance companies / providers (for pure policy management)
+function getInsuranceCompaniesList($conn = null) {
+    $defaults = [
+        ['id' => 1, 'company_name' => 'Star Health and Allied Insurance', 'company_code' => 'STAR'],
+        ['id' => 2, 'company_name' => 'HDFC ERGO General Insurance', 'company_code' => 'HDFCERGO'],
+        ['id' => 3, 'company_name' => 'ICICI Lombard General Insurance', 'company_code' => 'ICICILOMB'],
+        ['id' => 4, 'company_name' => 'Care Health Insurance', 'company_code' => 'CARE'],
+        ['id' => 5, 'company_name' => 'Niva Bupa Health Insurance', 'company_code' => 'NIVABUPA'],
+        ['id' => 6, 'company_name' => 'Tata AIG General Insurance', 'company_code' => 'TATAAIG'],
+        ['id' => 7, 'company_name' => 'Bajaj Allianz General Insurance', 'company_code' => 'BAJAJALL'],
+        ['id' => 8, 'company_name' => 'New India Assurance', 'company_code' => 'NEWINDIA'],
+        ['id' => 9, 'company_name' => 'National Insurance Company', 'company_code' => 'NATIONAL'],
+        ['id' => 10, 'company_name' => 'The Oriental Insurance Company', 'company_code' => 'ORIENTAL'],
+        ['id' => 11, 'company_name' => 'United India Insurance', 'company_code' => 'UNITEDIN'],
+        ['id' => 12, 'company_name' => 'Life Insurance Corporation of India (LIC)', 'company_code' => 'LIC'],
+        ['id' => 13, 'company_name' => 'SBI Life Insurance', 'company_code' => 'SBILIFE'],
+        ['id' => 14, 'company_name' => 'HDFC Life Insurance', 'company_code' => 'HDFCLIFE'],
+        ['id' => 15, 'company_name' => 'ICICI Prudential Life Insurance', 'company_code' => 'ICICIPRU'],
+        ['id' => 16, 'company_name' => 'Max Life Insurance', 'company_code' => 'MAXLIFE'],
+        ['id' => 17, 'company_name' => 'Go Digit General Insurance', 'company_code' => 'GODIGIT'],
+        ['id' => 18, 'company_name' => 'Acko General Insurance', 'company_code' => 'ACKO']
+    ];
+
+    if ($conn) {
+        try {
+            // Also check existing buyers table if still present during transition
+            $bChk = $conn->query("SHOW TABLES LIKE 'buyers'");
+            if ($bChk && $bChk->num_rows > 0) {
+                $bRes = $conn->query("SELECT id, company_name, company_code FROM buyers WHERE is_active = 1 ORDER BY company_name");
+                if ($bRes && $bRes->num_rows > 0) {
+                    $bList = [];
+                    while ($br = $bRes->fetch_assoc()) $bList[] = $br;
+                    return $bList;
+                }
+            }
+
+            // Otherwise merge with distinct company names from policy entries
+            $cq = $conn->query("SELECT DISTINCT company_name, company_code FROM policy_entries WHERE company_name IS NOT NULL AND company_name != ''");
+            if ($cq) {
+                $existing = [];
+                foreach ($defaults as $d) $existing[strtolower($d['company_name'])] = true;
+                $nextId = 100;
+                while ($cr = $cq->fetch_assoc()) {
+                    $key = strtolower(trim($cr['company_name']));
+                    if (!isset($existing[$key]) && !empty($cr['company_name'])) {
+                        $defaults[] = [
+                            'id' => $nextId++,
+                            'company_name' => trim($cr['company_name']),
+                            'company_code' => trim($cr['company_code'] ?? strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $cr['company_name']), 0, 8)))
+                        ];
+                        $existing[$key] = true;
+                    }
+                }
+            }
+        } catch (\Throwable $e) {}
+    }
+    return $defaults;
 }
 
 // insurance verticals — Motor, Health, Life (extensible from insurance_categories table)
@@ -383,10 +452,15 @@ function insertAgentMirror($conn, $agentId, $bankAccId, $bankTxnId, $date, $type
 }
 // buyer leg (mirror) for a bank entry -> returns new buyer txn id
 function insertBuyerMirror($conn, $buyerId, $bankAccId, $bankTxnId, $date, $type, $cr, $dr, $desc, $ref, $by) {
-    $stmt = $conn->prepare("INSERT INTO buyer_transactions (buyer_id, transaction_date, description, transaction_type, credit_amount, debit_amount, running_balance, reference_number, bank_account_id, bank_txn_id, is_linked_mirror, created_by) VALUES (?,?,?,?,?,?,0.00,?,?,?,1,?)");
-    $stmt->bind_param("isssddsiii", $buyerId, $date, $desc, $type, $cr, $dr, $ref, $bankAccId, $bankTxnId, $by);
-    $stmt->execute(); $id = (int)$stmt->insert_id; $stmt->close();
-    return $id;
+    try {
+        $chk = $conn->query("SHOW TABLES LIKE 'buyer_transactions'");
+        if (!$chk || $chk->num_rows === 0) return 0;
+        $stmt = $conn->prepare("INSERT INTO buyer_transactions (buyer_id, transaction_date, description, transaction_type, credit_amount, debit_amount, running_balance, reference_number, bank_account_id, bank_txn_id, is_linked_mirror, created_by) VALUES (?,?,?,?,?,?,0.00,?,?,?,1,?)");
+        if (!$stmt) return 0;
+        $stmt->bind_param("isssddsiii", $buyerId, $date, $desc, $type, $cr, $dr, $ref, $bankAccId, $bankTxnId, $by);
+        $stmt->execute(); $id = (int)$stmt->insert_id; $stmt->close();
+        return $id;
+    } catch (\Throwable $e) { return 0; }
 }
 // delete a mirror row by id -> returns parent id needed for recalc (0 if gone)
 function deleteBankMirror($conn, $bankTxnId) {
@@ -413,14 +487,21 @@ function deleteAgentMirror($conn, $txnId) {
 }
 function deleteBuyerMirror($conn, $txnId) {
     $txnId = (int)$txnId; if ($txnId <= 0) return 0;
-    $bid = 0;
-    $q = $conn->prepare("SELECT buyer_id FROM buyer_transactions WHERE id = ?");
-    $q->bind_param("i", $txnId); $q->execute();
-    if ($r = $q->get_result()->fetch_assoc()) $bid = (int)$r['buyer_id'];
-    $q->close();
-    $d = $conn->prepare("DELETE FROM buyer_transactions WHERE id = ?");
-    $d->bind_param("i", $txnId); $d->execute(); $d->close();
-    return $bid;
+    try {
+        $chk = $conn->query("SHOW TABLES LIKE 'buyer_transactions'");
+        if (!$chk || $chk->num_rows === 0) return 0;
+        $bid = 0;
+        $q = $conn->prepare("SELECT buyer_id FROM buyer_transactions WHERE id = ?");
+        if (!$q) return 0;
+        $q->bind_param("i", $txnId); $q->execute();
+        if ($r = $q->get_result()->fetch_assoc()) $bid = (int)$r['buyer_id'];
+        $q->close();
+        $d = $conn->prepare("DELETE FROM buyer_transactions WHERE id = ?");
+        if ($d) {
+            $d->bind_param("i", $txnId); $d->execute(); $d->close();
+        }
+        return $bid;
+    } catch (\Throwable $e) { return 0; }
 }
 // party leg (mirror) for a bank entry -> returns [kind, partyTxnId] (['',0] if none)
 function insertPartyMirrorForBank($conn, $linkType, $partyId, $bankAccId, $bankTxnId, $date, $bankType, $amt, $desc, $ref, $by) {

@@ -253,12 +253,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
 
                     $branchId = 1;
-                    $buyerId = null;
-                    $bRes = $conn->query("SELECT id FROM buyers WHERE is_active = 1 LIMIT 1");
-                    if ($bRes && ($bRow = $bRes->fetch_assoc())) {
-                        $buyerId = (int)$bRow['id'];
-                    }
-
                     $assignedAgentId = ($role === 'agent') ? $aid : (!empty($_POST['agent_id']) ? (int)$_POST['agent_id'] : null);
                     if ($assignedAgentId && $assignedAgentId <= 0) $assignedAgentId = null;
                     $agentName = $_SESSION['username'] ?? 'Staff';
@@ -266,14 +260,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                     $insSql = "INSERT INTO policy_entries (
                         insurance_category, entry_date, branch_id, vehicle_id, vehicle_number, vehicle_type,
-                        customer_id, customer_name, agent_id, agent_name, buyer_id, company_name, company_code,
+                        customer_id, customer_name, agent_id, agent_name, company_name, company_code,
                         policy_number, policy_type, business_type, total_premium_amount, net_premium_amount, gst_amount,
                         idv, ncb_percent, sum_insured, plan_name, tpa_name, members_count, members_details,
                         nominee_name, nominee_relation, policy_start_date, policy_end_date, status,
                         renewal_status, verification_status, verified_by, verified_at, created_by
                     ) VALUES (
                         ?, ?, ?, ?, ?, ?,
-                        ?, ?, ?, ?, ?, ?, ?,
+                        ?, ?, ?, ?, ?, ?,
                         ?, ?, ?, ?, ?, ?,
                         ?, ?, ?, ?, ?, ?, ?,
                         ?, ?, ?, ?, 'active',
@@ -283,9 +277,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     try {
                         $insStmt = $conn->prepare($insSql);
                         $insStmt->bind_param(
-                            "ssiisssssisssssddddddsssisssssii",
+                            "ssiisssisissssddddddsssisssssii",
                             $insuranceCat, $entryDate, $branchId, $vehicleId, $vehicleNumber, $vehicleType,
-                            $customerId, $custName, $assignedAgentId, $agentName, $buyerId, $companyName, $companyCode,
+                            $customerId, $custName, $assignedAgentId, $agentName, $companyName, $companyCode,
                             $policyNumber, $policyType, $businessType, $totalPremium, $netPremium, $gstAmount,
                             $idv, $ncbPercent, $sumInsured, $planName, $tpaName, $membersCount, $membersDetails,
                             $nomineeName, $nomineeRelation, $startDate, $endDate, $userId, $userId

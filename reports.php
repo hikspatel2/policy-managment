@@ -51,9 +51,7 @@ if (isset($_GET['action'])) {
                 $r = $conn->query("SELECT id, name, agent_code FROM agents WHERE is_active=1 ORDER BY name");
                 while ($row = $r->fetch_assoc()) $agents[] = $row;
 
-                $buyers = [];
-                $r = $conn->query("SELECT id, company_name FROM buyers WHERE is_active=1 ORDER BY company_name");
-                while ($row = $r->fetch_assoc()) $buyers[] = $row;
+                $buyers = getInsuranceCompaniesList($conn);
 
                 $conn->close();
                 echo json_encode(['success' => true, 'branches' => $branches, 'agents' => $agents, 'buyers' => $buyers]);
@@ -67,7 +65,7 @@ if (isset($_GET['action'])) {
                 $sql = "SELECT a.id, a.name, a.agent_code,
                                COUNT(p.id) AS policy_count,
                                COALESCE(SUM(p.total_premium_amount),0) AS premium,
-                               COALESCE(SUM(p.agent_commission_amount),0) AS comm_earned
+                               0.00 AS comm_earned
                         FROM agents a
                         LEFT JOIN policy_entries p
                           ON p.agent_id = a.id AND p.status != 'cancelled'
@@ -76,7 +74,7 @@ if (isset($_GET['action'])) {
                 $types = 'ss';
                 if ($agentId) { $sql .= " AND a.id = ?"; $params[] = $agentId; $types .= 'i'; }
                 if ($cat !== '') { $sql .= " AND p.insurance_category = ?"; $params[] = $cat; $types .= 's'; }
-                $sql .= " WHERE a.is_active = 1 GROUP BY a.id, a.name, a.agent_code ORDER BY comm_earned DESC";
+                $sql .= " WHERE a.is_active = 1 GROUP BY a.id, a.name, a.agent_code ORDER BY premium DESC";
 
                 $stmt = $conn->prepare($sql);
                 $stmt->bind_param($types, ...$params);
@@ -86,20 +84,25 @@ if (isset($_GET['action'])) {
                 while ($row = $res->fetch_assoc()) $rows[$row['id']] = $row + ['paid' => 0];
                 $stmt->close();
 
-                // paid side from agent_transactions — debit = money paid out to agent in range
-                $sql2 = "SELECT agent_id, COALESCE(SUM(debit_amount),0) AS paid
-                         FROM agent_transactions
-                         WHERE transaction_type = 'payment_out'
-                           AND transaction_date BETWEEN ? AND ?
-                         GROUP BY agent_id";
-                $stmt = $conn->prepare($sql2);
-                $stmt->bind_param('ss', $from, $to);
-                $stmt->execute();
-                $res = $stmt->get_result();
-                while ($row = $res->fetch_assoc()) {
-                    if (isset($rows[$row['agent_id']])) $rows[$row['agent_id']]['paid'] = (float)$row['paid'];
-                }
-                $stmt->close();
+                // Check if agent_transactions table exists
+                try {
+                    $chkAgTx = $conn->query("SHOW TABLES LIKE 'agent_transactions'");
+                    if ($chkAgTx && $chkAgTx->num_rows > 0) {
+                        $sql2 = "SELECT agent_id, COALESCE(SUM(debit_amount),0) AS paid
+                                 FROM agent_transactions
+                                 WHERE transaction_type = 'payment_out'
+                                   AND transaction_date BETWEEN ? AND ?
+                                 GROUP BY agent_id";
+                        $stmt = $conn->prepare($sql2);
+                        $stmt->bind_param('ss', $from, $to);
+                        $stmt->execute();
+                        $res = $stmt->get_result();
+                        while ($row = $res->fetch_assoc()) {
+                            if (isset($rows[$row['agent_id']])) $rows[$row['agent_id']]['paid'] = (float)$row['paid'];
+                        }
+                        $stmt->close();
+                    }
+                } catch (\Throwable $e) {}
 
                 $out = [];
                 foreach ($rows as $r) {
@@ -213,8 +216,8 @@ if (isset($_GET['action'])) {
                 $sql = "SELECT b.id, b.name,
                                COUNT(p.id) AS policy_count,
                                COALESCE(SUM(p.total_premium_amount),0) AS premium,
-                               COALESCE(SUM(p.buyer_commission_amount),0) AS buyer_comm,
-                               COALESCE(SUM(p.agent_commission_amount),0) AS agent_comm
+                               0.00 AS buyer_comm,
+                               0.00 AS agent_comm
                         FROM branches b
                         LEFT JOIN policy_entries p
                           ON p.branch_id = b.id AND p.status != 'cancelled'
@@ -266,8 +269,8 @@ if (isset($_GET['action'])) {
 
             // report 5: expense vs income P&L
             case 'reportProfitLoss':
-                // income = buyer commission earned (exclude cancelled)
-                $stmt = $conn->prepare("SELECT COALESCE(SUM(buyer_commission_amount),0) AS v
+                // total premium collected (exclude cancelled)
+                $stmt = $conn->prepare("SELECT COALESCE(SUM(total_premium_amount),0) AS v
                                         FROM policy_entries
                                         WHERE status != 'cancelled' AND entry_date BETWEEN ? AND ?");
                 $stmt->bind_param('ss', $from, $to);
@@ -275,14 +278,7 @@ if (isset($_GET['action'])) {
                 $buyerComm = (float)$stmt->get_result()->fetch_assoc()['v'];
                 $stmt->close();
 
-                // agent commission expense
-                $stmt = $conn->prepare("SELECT COALESCE(SUM(agent_commission_amount),0) AS v
-                                        FROM policy_entries
-                                        WHERE status != 'cancelled' AND entry_date BETWEEN ? AND ?");
-                $stmt->bind_param('ss', $from, $to);
-                $stmt->execute();
-                $agentComm = (float)$stmt->get_result()->fetch_assoc()['v'];
-                $stmt->close();
+                $agentComm = 0.00;
 
                 // operating expenses
                 $stmt = $conn->prepare("SELECT COALESCE(SUM(amount),0) AS v
@@ -316,62 +312,37 @@ if (isset($_GET['action'])) {
                 ]]);
                 exit();
 
-            // report 6: buyer commission — receivable vs received
+            // report 6: insurance company performance — policies and premium volume
             case 'reportBuyerCommission':
-                $buyerId = (int)($_GET['buyer_id'] ?? 0);
-
-                // receivable side from policy entries
-                $sql = "SELECT b.id, b.company_name, b.company_code,
+                $sql = "SELECT COALESCE(p.company_name, 'Unknown') as company_name,
+                               COALESCE(p.company_code, 'INS') as company_code,
                                COUNT(p.id) AS policy_count,
-                               COALESCE(SUM(p.total_premium_amount),0) AS premium,
-                               COALESCE(SUM(p.buyer_commission_amount),0) AS receivable
-                        FROM buyers b
-                        LEFT JOIN policy_entries p
-                          ON p.buyer_id = b.id AND p.status != 'cancelled'
+                               COALESCE(SUM(p.total_premium_amount),0) AS premium
+                        FROM policy_entries p
+                        WHERE p.status != 'cancelled'
                           AND p.entry_date BETWEEN ? AND ?";
                 $params = [$from, $to];
                 $types = 'ss';
-                if ($buyerId) { $sql .= " AND b.id = ?"; $params[] = $buyerId; $types .= 'i'; }
                 if ($cat !== '') { $sql .= " AND p.insurance_category = ?"; $params[] = $cat; $types .= 's'; }
-                $sql .= " WHERE b.is_active = 1 GROUP BY b.id, b.company_name, b.company_code ORDER BY receivable DESC";
+                $sql .= " GROUP BY p.company_name, p.company_code ORDER BY premium DESC";
 
                 $stmt = $conn->prepare($sql);
                 $stmt->bind_param($types, ...$params);
                 $stmt->execute();
                 $res = $stmt->get_result();
-                $rows = [];
-                while ($row = $res->fetch_assoc()) $rows[$row['id']] = $row + ['received' => 0];
-                $stmt->close();
-
-                // received side from buyer_transactions — credit on payment_received
-                $sql2 = "SELECT buyer_id, COALESCE(SUM(credit_amount),0) AS received
-                         FROM buyer_transactions
-                         WHERE transaction_type = 'payment_received'
-                           AND transaction_date BETWEEN ? AND ?
-                         GROUP BY buyer_id";
-                $stmt = $conn->prepare($sql2);
-                $stmt->bind_param('ss', $from, $to);
-                $stmt->execute();
-                $res = $stmt->get_result();
-                while ($row = $res->fetch_assoc()) {
-                    if (isset($rows[$row['buyer_id']])) $rows[$row['buyer_id']]['received'] = (float)$row['received'];
-                }
-                $stmt->close();
-
                 $out = [];
-                foreach ($rows as $r) {
-                    $rec = (float)$r['receivable'];
-                    $got = (float)$r['received'];
+                while ($row = $res->fetch_assoc()) {
                     $out[] = [
-                        'company_code' => $r['company_code'],
-                        'company_name' => $r['company_name'],
-                        'policy_count' => (int)$r['policy_count'],
-                        'premium'      => (float)$r['premium'],
-                        'receivable'   => $rec,
-                        'received'     => $got,
-                        'outstanding'  => $rec - $got
+                        'company_code' => $row['company_code'],
+                        'company_name' => $row['company_name'],
+                        'policy_count' => (int)$row['policy_count'],
+                        'premium'      => (float)$row['premium'],
+                        'receivable'   => 0.00,
+                        'received'     => 0.00,
+                        'outstanding'  => 0.00
                     ];
                 }
+                $stmt->close();
                 $conn->close();
                 echo json_encode(['success' => true, 'data' => $out]);
                 exit();
@@ -382,8 +353,8 @@ if (isset($_GET['action'])) {
                                COUNT(id) AS policy_count,
                                COALESCE(SUM(total_premium_amount),0) AS premium,
                                COALESCE(SUM(net_premium_amount),0) AS net_premium,
-                               COALESCE(SUM(buyer_commission_amount),0) AS buyer_comm,
-                               COALESCE(SUM(agent_commission_amount),0) AS agent_comm
+                               0.00 AS buyer_comm,
+                               0.00 AS agent_comm
                         FROM policy_entries
                         WHERE status != 'cancelled'
                           AND entry_date BETWEEN ? AND ?

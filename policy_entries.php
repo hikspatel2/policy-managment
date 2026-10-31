@@ -261,8 +261,8 @@ function trashPolicy($conn, $pid, $uid) {
     $ids = fn($sql) => array_map('intval', array_column(policyRows($conn, $sql, $pid), 'id'));
     $snap = [
         'policy' => $pol,
-        'agent_tx' => policyRows($conn, "SELECT * FROM agent_transactions WHERE policy_entry_id = ?", $pid),
-        'buyer_tx' => policyRows($conn, "SELECT * FROM buyer_transactions WHERE policy_entry_id = ?", $pid),
+        'agent_tx' => [],
+        'buyer_tx' => [],
         'bank_tx' => policyRows($conn, "SELECT * FROM bank_transactions WHERE policy_entry_id = ?", $pid),
         'docs' => policyRows($conn, "SELECT * FROM policy_documents WHERE policy_entry_id = ?", $pid),
         'endorsements' => policyRows($conn, "SELECT * FROM policy_endorsements WHERE policy_entry_id = ?", $pid, true),
@@ -285,14 +285,11 @@ function trashPolicy($conn, $pid, $uid) {
 
     // every party / account the policy touched — incl. both payment accounts
     $touch = ['agents' => [], 'buyers' => [], 'banks' => []];
-    foreach ($snap['agent_tx'] as $r) $touch['agents'][(int)$r['agent_id']] = 1;
-    foreach ($snap['buyer_tx'] as $r) $touch['buyers'][(int)$r['buyer_id']] = 1;
     foreach ($snap['bank_tx'] as $r) $touch['banks'][(int)$r['bank_account_id']] = 1;
-    if ($pol['agent_id']) $touch['agents'][(int)$pol['agent_id']] = 1;
-    if ($pol['buyer_id']) $touch['buyers'][(int)$pol['buyer_id']] = 1;
+    if (!empty($pol['agent_id'])) $touch['agents'][(int)$pol['agent_id']] = 1;
     foreach (['bank_account_id', 'payment_in_bank_account_id', 'payment_out_bank_account_id'] as $k) if (!empty($pol[$k])) $touch['banks'][(int)$pol[$k]] = 1;
 
-    foreach (['DELETE FROM agent_transactions WHERE policy_entry_id = ?', 'DELETE FROM buyer_transactions WHERE policy_entry_id = ?', 'DELETE FROM bank_transactions WHERE policy_entry_id = ?',
+    foreach (['DELETE FROM bank_transactions WHERE policy_entry_id = ?',
               'UPDATE policy_entries SET previous_policy_id = NULL WHERE previous_policy_id = ?', 'DELETE FROM policy_entries WHERE id = ?'] as $sql) policyExec($conn, $sql, $pid); // documents + endorsements cascade
     return array_map('array_keys', $touch);
 }
@@ -323,7 +320,7 @@ function restorePolicy($conn, $trashId) {
         throw $e;
     }
     $move = $newId !== $oldId;
-    foreach (['agent_tx' => 'agent_transactions', 'buyer_tx' => 'buyer_transactions', 'bank_tx' => 'bank_transactions', 'docs' => 'policy_documents', 'endorsements' => 'policy_endorsements'] as $k => $table) {
+    foreach (['bank_tx' => 'bank_transactions', 'docs' => 'policy_documents', 'endorsements' => 'policy_endorsements'] as $k => $table) {
         foreach ($s[$k] ?? [] as $r) {
             $r['policy_entry_id'] = $newId;
             if (!$free($table, $r['id'])) unset($r['id']);
@@ -345,9 +342,8 @@ function restorePolicy($conn, $trashId) {
     policyExec($conn, "DELETE FROM policy_trash WHERE id = ?", $trashId);
 
     $touch = ['agents' => [], 'buyers' => [], 'banks' => []];
-    foreach ($s['agent_tx'] ?? [] as $r) $touch['agents'][(int)$r['agent_id']] = 1;
-    foreach ($s['buyer_tx'] ?? [] as $r) $touch['buyers'][(int)$r['buyer_id']] = 1;
     foreach ($s['bank_tx'] ?? [] as $r) $touch['banks'][(int)$r['bank_account_id']] = 1;
+    if (!empty($pol['agent_id'])) $touch['agents'][(int)$pol['agent_id']] = 1;
     return ['id' => $newId, 'number' => $pol['policy_number']] + array_map('array_keys', $touch);
 }
 
@@ -400,12 +396,7 @@ if (isset($_GET['action'])) {
                 while ($r = $res->fetch_assoc()) $out['agents'][] = $r;
                 $stmt->close();
 
-                $stmt = $conn->prepare("SELECT id, company_name, company_code FROM buyers WHERE is_active=1 ORDER BY company_name");
-                $stmt->execute();
-                $res = $stmt->get_result();
-                $out['buyers'] = [];
-                while ($r = $res->fetch_assoc()) $out['buyers'][] = $r;
-                $stmt->close();
+                $out['buyers'] = getInsuranceCompaniesList($conn);
 
                 if ($isAgent) {
                     $myAgentId = agentIdForUser($conn, $user_id) ?? 0;
@@ -443,8 +434,7 @@ if (isset($_GET['action'])) {
                                pe.customer_id, pe.customer_name, pe.company_name, pe.company_code,
                                pe.branch_id, br.name as branch_name,
                                pe.total_premium_amount, pe.tp_amount, pe.od_amount, pe.net_premium_amount,
-                               pe.buyer_commission_basis, pe.buyer_commission_rate, pe.buyer_commission_amount,
-                               pe.agent_id, pe.agent_name, pe.agent_commission_basis, pe.agent_commission_rate, pe.agent_commission_amount,
+                               pe.agent_id, pe.agent_name,
                                pe.vehicle_id, pe.payment_mode, pe.bank_name, pe.payment_in, pe.payment_out,
                                pe.status, pe.remarks, pe.policy_start_date, pe.policy_end_date,
                                pe.policy_type, pe.business_type, pe.proposal_number, pe.idv, pe.gst_amount, pe.ncb_percent, pe.cancellation_reason,
@@ -494,8 +484,13 @@ if (isset($_GET['action'])) {
                     $row['tp_amount'] = (float)$row['tp_amount'];
                     $row['od_amount'] = (float)$row['od_amount'];
                     $row['net_premium_amount'] = (float)$row['net_premium_amount'];
-                    $row['buyer_commission_amount'] = (float)$row['buyer_commission_amount'];
-                    $row['agent_commission_amount'] = (float)($row['agent_commission_amount'] ?? 0);
+                    $row['buyer_commission_amount'] = 0.00;
+                    $row['agent_commission_amount'] = 0.00;
+                    $row['buyer_commission_basis'] = '';
+                    $row['buyer_commission_rate'] = 0.00;
+                    $row['agent_commission_basis'] = '';
+                    $row['agent_commission_rate'] = 0.00;
+                    $row['buyer_id'] = 0;
                     $row['payment_in'] = (float)($row['payment_in'] ?? 0);
                     $row['payment_out'] = (float)($row['payment_out'] ?? 0);
                     $row['gst_amount'] = (float)($row['gst_amount'] ?? 0);
@@ -566,20 +561,14 @@ if (isset($_GET['action'])) {
                 }
 
                 $row['id'] = (int)$row['id'];
-                if ($isCustomer) {
-                    $row['buyer_commission_basis'] = '';
-                    $row['buyer_commission_rate'] = 0;
-                    $row['buyer_commission_amount'] = 0;
-                    $row['agent_commission_basis'] = '';
-                    $row['agent_commission_rate'] = 0;
-                    $row['agent_commission_amount'] = 0;
-                    $row['payment_out'] = 0;
-                    $row['company_code'] = '';
-                    $row['buyer_id'] = 0;
-                    $row['buyer_name'] = '';
-                    $row['payment_out_bank_account_id'] = 0;
-                    $row['payment_out_bank_name'] = '';
-                }
+                $row['buyer_commission_basis'] = $row['buyer_commission_basis'] ?? '';
+                $row['buyer_commission_rate'] = (float)($row['buyer_commission_rate'] ?? 0);
+                $row['buyer_commission_amount'] = (float)($row['buyer_commission_amount'] ?? 0);
+                $row['agent_commission_basis'] = $row['agent_commission_basis'] ?? '';
+                $row['agent_commission_rate'] = (float)($row['agent_commission_rate'] ?? 0);
+                $row['agent_commission_amount'] = (float)($row['agent_commission_amount'] ?? 0);
+                $row['buyer_id'] = (int)($row['buyer_id'] ?? 0);
+                $row['buyer_name'] = $row['company_name'] ?? '';
                 $conn->close();
                 echo json_encode(['success' => true, 'data' => $row]);
                 exit();
@@ -789,14 +778,25 @@ if (isset($_GET['action'])) {
                 $stmt->close();
                 $customerName = $cust ? $cust['name'] : '';
 
-                // buyer
-                $stmt = $conn->prepare("SELECT company_name, company_code FROM buyers WHERE id = ?");
-                $stmt->bind_param("i", $buyerId);
-                $stmt->execute();
-                $buy = $stmt->get_result()->fetch_assoc();
-                $stmt->close();
-                $companyName = $buy ? $buy['company_name'] : '';
-                $companyCode = $buy ? $buy['company_code'] : '';
+                // insurance provider / company
+                $companyName = trim($_POST['company_name'] ?? '');
+                $companyCode = trim($_POST['company_code'] ?? '');
+                if (empty($companyName) && !empty($buyerId)) {
+                    $insList = getInsuranceCompaniesList($conn);
+                    foreach ($insList as $ins) {
+                        if ($ins['id'] == $buyerId || $ins['company_code'] == $buyerId) {
+                            $companyName = $ins['company_name'];
+                            $companyCode = $ins['company_code'];
+                            break;
+                        }
+                    }
+                }
+                if (empty($companyName)) {
+                    $companyName = !empty($_POST['insurance_provider']) ? trim($_POST['insurance_provider']) : 'General Insurance';
+                }
+                if (empty($companyCode)) {
+                    $companyCode = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $companyName), 0, 8));
+                }
 
                 // agent guaranteed present above (agent-based only)
                 $agentName = null;
@@ -834,22 +834,20 @@ if (isset($_GET['action'])) {
                 try {
                     $stmt = $conn->prepare("INSERT INTO policy_entries (
                         entry_date, branch_id, vehicle_id, vehicle_number, vehicle_type,
-                        customer_id, customer_name, agent_id, agent_name, buyer_id,
+                        customer_id, customer_name, agent_id, agent_name,
                         company_name, company_code, policy_number, total_premium_amount, tp_amount,
-                        od_amount, net_premium_amount, buyer_commission_basis, buyer_commission_rate, buyer_commission_amount,
-                        agent_commission_basis, agent_commission_rate, agent_commission_amount, is_commission_manual,
+                        od_amount, net_premium_amount,
                         bank_account_id, bank_name, payment_in, payment_out, payment_in_bank_account_id, payment_out_bank_account_id, payment_mode,
                         policy_start_date, policy_end_date, status, remarks, created_by
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
-                    // types: s=str i=int d=decimal, 36 params
+                    // types: s=str i=int d=decimal, 28 params
                     $stmt->bind_param(
-                        "siissisisisssddddsddsddiisddiisssssi",
+                        "siissisissssddddisddiisssssi",
                         $entryDate, $branchId, $vehicleId, $vehicleNumber, $vehicleType,
-                        $customerId, $customerName, $agentId, $agentName, $buyerId,
+                        $customerId, $customerName, $agentId, $agentName,
                         $companyName, $companyCode, $policyNumber, $totalPremium, $tpAmount,
-                        $odAmount, $netPremium, $buyerBasis, $buyerRate, $buyerCommAmt,
-                        $agentBasis, $agentRate, $agentCommAmt, $isManual,
+                        $odAmount, $netPremium,
                         $bankAccId, $bankName, $paymentIn, $paymentOut, $payInBankId, $payOutBankId, $paymentMode,
                         $policyStart, $policyEnd, $status, $remarks, $createdBy
                     );
@@ -880,28 +878,6 @@ if (isset($_GET['action'])) {
                         $conn->query("UPDATE subscriptions SET policy_count = policy_count + 1 WHERE agent_id = {$agentId} AND status = 'active' ORDER BY id DESC LIMIT 1");
                     }
 
-                    $zero = 0.00;
-
-                    // auto-post agent commission txn
-                    if ($agentId && $agentCommAmt > 0) {
-                        $commDesc = "Commission for $policyNumber";
-                        $commType = 'commission';
-                        $stmt = $conn->prepare("INSERT INTO agent_transactions (agent_id, transaction_date, description, transaction_type, credit_amount, debit_amount, running_balance, policy_entry_id, created_by) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)");
-                        $stmt->bind_param("isssddii", $agentId, $entryDate, $commDesc, $commType, $agentCommAmt, $zero, $insertId, $user_id);
-                        $stmt->execute();
-                        $stmt->close();
-                    }
-
-                    // auto-post buyer commission txn
-                    if ($buyerId && $buyerCommAmt > 0) {
-                        $commDesc = "Commission for $policyNumber";
-                        $commType = 'commission_receivable';
-                        $stmt = $conn->prepare("INSERT INTO buyer_transactions (buyer_id, transaction_date, description, transaction_type, credit_amount, debit_amount, running_balance, policy_entry_id, created_by) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)");
-                        $stmt->bind_param("isssddii", $buyerId, $entryDate, $commDesc, $commType, $buyerCommAmt, $zero, $insertId, $user_id);
-                        $stmt->execute();
-                        $stmt->close();
-                    }
-
                     // auto-post payment_in bank txn -> into the payment-in account
                     if ($payInBankId && $paymentIn > 0) {
                         $btDesc = "Payment In - $policyNumber ($customerName)";
@@ -922,9 +898,6 @@ if (isset($_GET['action'])) {
                         $stmt->close();
                     }
 
-                    // recompute balances from ledgers
-                    if ($agentId && $agentCommAmt > 0) recalcAgentBalances($conn, $agentId);
-                    if ($buyerId && $buyerCommAmt > 0) recalcBuyerBalances($conn, $buyerId);
                     foreach (array_unique(array_filter([$payInBankId, $payOutBankId])) as $bk) recalcBankBalance($conn, $bk);
 
                     // notify admins + assigned agent (inside txn - no orphan on rollback)
@@ -1064,13 +1037,25 @@ if (isset($_GET['action'])) {
                 $stmt->close();
                 $customerName = $cust ? $cust['name'] : '';
 
-                $stmt = $conn->prepare("SELECT company_name, company_code FROM buyers WHERE id = ?");
-                $stmt->bind_param("i", $buyerId);
-                $stmt->execute();
-                $buy = $stmt->get_result()->fetch_assoc();
-                $stmt->close();
-                $companyName = $buy ? $buy['company_name'] : '';
-                $companyCode = $buy ? $buy['company_code'] : '';
+                // insurance provider / company
+                $companyName = trim($_POST['company_name'] ?? '');
+                $companyCode = trim($_POST['company_code'] ?? '');
+                if (empty($companyName) && !empty($buyerId)) {
+                    $insList = getInsuranceCompaniesList($conn);
+                    foreach ($insList as $ins) {
+                        if ($ins['id'] == $buyerId || $ins['company_code'] == $buyerId) {
+                            $companyName = $ins['company_name'];
+                            $companyCode = $ins['company_code'];
+                            break;
+                        }
+                    }
+                }
+                if (empty($companyName)) {
+                    $companyName = !empty($_POST['insurance_provider']) ? trim($_POST['insurance_provider']) : 'General Insurance';
+                }
+                if (empty($companyCode)) {
+                    $companyCode = strtoupper(substr(preg_replace('/[^A-Za-z0-9]/', '', $companyName), 0, 8));
+                }
 
                 // agent is mandatory - always agent-based, no Company Direct
                 if (!$agentId) {
@@ -1109,47 +1094,39 @@ if (isset($_GET['action'])) {
 
                 $conn->begin_transaction();
                 try {
-                    // load old row to reverse its auto-posted ledger entries
-                    $stmt = $conn->prepare("SELECT agent_id, buyer_id, bank_account_id, payment_in_bank_account_id, payment_out_bank_account_id FROM policy_entries WHERE id = ?");
+                    // load old row to reverse its auto-posted bank ledger entries
+                    $stmt = $conn->prepare("SELECT agent_id, bank_account_id, payment_in_bank_account_id, payment_out_bank_account_id FROM policy_entries WHERE id = ?");
                     $stmt->bind_param("i", $pid);
                     $stmt->execute();
                     $old = $stmt->get_result()->fetch_assoc();
                     $stmt->close();
                     if (!$old) throw new Exception('Policy not found');
 
-                    $oldAgentId = $old['agent_id'] ? (int)$old['agent_id'] : null;
-                    $oldBuyerId = $old['buyer_id'] ? (int)$old['buyer_id'] : null;
                     $oldBankId = $old['bank_account_id'] ? (int)$old['bank_account_id'] : null;
                     $oldInBankId = $old['payment_in_bank_account_id'] ? (int)$old['payment_in_bank_account_id'] : null;
                     $oldOutBankId = $old['payment_out_bank_account_id'] ? (int)$old['payment_out_bank_account_id'] : null;
 
-                    // reverse old auto-posted entries
-                    $del = $conn->prepare("DELETE FROM agent_transactions WHERE policy_entry_id = ?");
-                    $del->bind_param("i", $pid); $del->execute(); $del->close();
-                    $del = $conn->prepare("DELETE FROM buyer_transactions WHERE policy_entry_id = ?");
-                    $del->bind_param("i", $pid); $del->execute(); $del->close();
+                    // reverse old auto-posted bank entries
                     $del = $conn->prepare("DELETE FROM bank_transactions WHERE policy_entry_id = ?");
                     $del->bind_param("i", $pid); $del->execute(); $del->close();
 
                     // update policy
                     $stmt = $conn->prepare("UPDATE policy_entries SET
                         entry_date=?, branch_id=?, vehicle_id=?, vehicle_number=?, vehicle_type=?,
-                        customer_id=?, customer_name=?, agent_id=?, agent_name=?, buyer_id=?,
+                        customer_id=?, customer_name=?, agent_id=?, agent_name=?,
                         company_name=?, company_code=?, policy_number=?, total_premium_amount=?, tp_amount=?,
-                        od_amount=?, net_premium_amount=?, buyer_commission_basis=?, buyer_commission_rate=?, buyer_commission_amount=?,
-                        agent_commission_basis=?, agent_commission_rate=?, agent_commission_amount=?, is_commission_manual=?,
+                        od_amount=?, net_premium_amount=?,
                         bank_account_id=?, bank_name=?, payment_in=?, payment_out=?, payment_in_bank_account_id=?, payment_out_bank_account_id=?, payment_mode=?,
                         policy_start_date=?, policy_end_date=?, status=?, remarks=?
                     WHERE id=?");
 
-                    // 36 params: same as insert minus created_by + id at end
+                    // 28 params
                     $stmt->bind_param(
-                        "siissisisisssddddsddsddiisddiisssssi",
+                        "siissisissssddddisddiisssssi",
                         $entryDate, $branchId, $vehicleId, $vehicleNumber, $vehicleType,
-                        $customerId, $customerName, $agentId, $agentName, $buyerId,
+                        $customerId, $customerName, $agentId, $agentName,
                         $companyName, $companyCode, $policyNumber, $totalPremium, $tpAmount,
-                        $odAmount, $netPremium, $buyerBasis, $buyerRate, $buyerCommAmt,
-                        $agentBasis, $agentRate, $agentCommAmt, $isManual,
+                        $odAmount, $netPremium,
                         $bankAccId, $bankName, $paymentIn, $paymentOut, $payInBankId, $payOutBankId, $paymentMode,
                         $policyStart, $policyEnd, $status, $remarks, $pid
                     );
@@ -1160,28 +1137,6 @@ if (isset($_GET['action'])) {
                     }
                     $stmt->close();
                     savePolicyExtras($conn, $pid, $extras, (int)$user_id);
-
-                    $zero = 0.00;
-
-                    // re-post agent commission
-                    if ($agentId && $agentCommAmt > 0) {
-                        $commDesc = "Commission for $policyNumber";
-                        $commType = 'commission';
-                        $stmt = $conn->prepare("INSERT INTO agent_transactions (agent_id, transaction_date, description, transaction_type, credit_amount, debit_amount, running_balance, policy_entry_id, created_by) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)");
-                        $stmt->bind_param("isssddii", $agentId, $entryDate, $commDesc, $commType, $agentCommAmt, $zero, $pid, $user_id);
-                        $stmt->execute();
-                        $stmt->close();
-                    }
-
-                    // re-post buyer commission
-                    if ($buyerId && $buyerCommAmt > 0) {
-                        $commDesc = "Commission for $policyNumber";
-                        $commType = 'commission_receivable';
-                        $stmt = $conn->prepare("INSERT INTO buyer_transactions (buyer_id, transaction_date, description, transaction_type, credit_amount, debit_amount, running_balance, policy_entry_id, created_by) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)");
-                        $stmt->bind_param("isssddii", $buyerId, $entryDate, $commDesc, $commType, $buyerCommAmt, $zero, $pid, $user_id);
-                        $stmt->execute();
-                        $stmt->close();
-                    }
 
                     // re-post payment_in bank txn -> into the payment-in account
                     if ($payInBankId && $paymentIn > 0) {
@@ -1203,11 +1158,6 @@ if (isset($_GET['action'])) {
                         $stmt->close();
                     }
 
-                    // recompute balances for every affected party (old + new)
-                    $agentsToFix = array_unique(array_filter([$oldAgentId, $agentId]));
-                    foreach ($agentsToFix as $a) recalcAgentBalances($conn, $a);
-                    $buyersToFix = array_unique(array_filter([$oldBuyerId, $buyerId]));
-                    foreach ($buyersToFix as $b) recalcBuyerBalances($conn, $b);
                     $banksToFix = array_unique(array_filter([$oldBankId, $oldInBankId, $oldOutBankId, $payInBankId, $payOutBankId]));
                     foreach ($banksToFix as $bk) recalcBankBalance($conn, $bk);
 
@@ -1412,33 +1362,8 @@ if (isset($_GET['action'])) {
                     exit();
                 }
 
-                // agent ledger lines auto-posted for this policy
+                // ledger lines for this policy
                 $ledger = [];
-                $stmt = $conn->prepare("SELECT at.transaction_date, at.description, at.transaction_type, at.credit_amount, at.debit_amount, a.name as party
-                                        FROM agent_transactions at LEFT JOIN agents a ON at.agent_id = a.id
-                                        WHERE at.policy_entry_id = ? ORDER BY at.id");
-                $stmt->bind_param("i", $pid);
-                $stmt->execute();
-                $r = $stmt->get_result();
-                while ($x = $r->fetch_assoc()) {
-                    $ledger[] = ['ledger'=>'Agent', 'party'=>$x['party'], 'date'=>$x['transaction_date'],
-                        'type'=>$x['transaction_type'], 'desc'=>$x['description'],
-                        'credit'=>(float)$x['credit_amount'], 'debit'=>(float)$x['debit_amount']];
-                }
-                $stmt->close();
-
-                $stmt = $conn->prepare("SELECT bt.transaction_date, bt.description, bt.transaction_type, bt.credit_amount, bt.debit_amount, b.company_name as party
-                                        FROM buyer_transactions bt LEFT JOIN buyers b ON bt.buyer_id = b.id
-                                        WHERE bt.policy_entry_id = ? ORDER BY bt.id");
-                $stmt->bind_param("i", $pid);
-                $stmt->execute();
-                $r = $stmt->get_result();
-                while ($x = $r->fetch_assoc()) {
-                    $ledger[] = ['ledger'=>'Buyer', 'party'=>$x['party'], 'date'=>$x['transaction_date'],
-                        'type'=>$x['transaction_type'], 'desc'=>$x['description'],
-                        'credit'=>(float)$x['credit_amount'], 'debit'=>(float)$x['debit_amount']];
-                }
-                $stmt->close();
 
                 // bank txns use a single amount + credit/debit type
                 $stmt = $conn->prepare("SELECT bnt.transaction_date, bnt.description, bnt.transaction_type, bnt.amount, ba.bank_name as party
@@ -1892,21 +1817,19 @@ if (isset($_GET['action'])) {
 
                         $stmt = $conn->prepare("INSERT INTO policy_entries (
                             entry_date, branch_id, vehicle_id, vehicle_number, vehicle_type,
-                            customer_id, customer_name, agent_id, agent_name, buyer_id,
+                            customer_id, customer_name, agent_id, agent_name,
                             company_name, company_code, policy_number, total_premium_amount, tp_amount,
-                            od_amount, net_premium_amount, buyer_commission_basis, buyer_commission_rate, buyer_commission_amount,
-                            agent_commission_basis, agent_commission_rate, agent_commission_amount, is_commission_manual,
+                            od_amount, net_premium_amount,
                             bank_account_id, bank_name, payment_in, payment_out, payment_in_bank_account_id, payment_out_bank_account_id, payment_mode,
                             policy_start_date, policy_end_date, status, remarks, created_by, insurance_category
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
 
                         $stmt->bind_param(
-                            "siissisisisssddddsddsddiisddiisssssis",
+                            "siissisissssddddisddiisssssis",
                             $entryDate, $branchId, $vehicleId, $vehicleNumber, $vehicleCategory,
-                            $customerId, $customerName, $agentId, $agentName, $buyerId,
+                            $customerId, $customerName, $agentId, $agentName,
                             $companyName, $companyCode, $policyNumber, $totalPremium, $tpAmount,
-                            $odAmount, $netPremium, $buyerBasis, $buyerRate, $buyerCommAmt,
-                            $agentBasisVal, $agentRateVal, $agentCommAmt, $isManual,
+                            $odAmount, $netPremium,
                             $bankAccId, $bankName, $payIn, $payOut, $payInBankIdVal, $payOutBankIdVal, $payModeVal,
                             $policyStart, $policyEnd, $status, $remarksValFinal, $user_id, $insCategory
                         );
@@ -1921,28 +1844,6 @@ if (isset($_GET['action'])) {
                         $newId = $stmt->insert_id;
                         $stmt->close();
                         savePolicyExtras($conn, $newId, $extras, null);
-
-                        $z = 0.00;
-
-                        // auto-post agent commission
-                        if ($agentId && $agentCommAmt > 0) {
-                            $cd = "Commission for $policyNumber";
-                            $ct = 'commission';
-                            $s = $conn->prepare("INSERT INTO agent_transactions (agent_id, transaction_date, description, transaction_type, credit_amount, debit_amount, running_balance, policy_entry_id, created_by) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)");
-                            $s->bind_param("isssddii", $agentId, $entryDate, $cd, $ct, $agentCommAmt, $z, $newId, $user_id);
-                            $s->execute();
-                            $s->close();
-                        }
-
-                        // auto-post buyer commission
-                        if ($buyerId && $buyerCommAmt > 0) {
-                            $cd = "Commission for $policyNumber";
-                            $ct = 'commission_receivable';
-                            $s = $conn->prepare("INSERT INTO buyer_transactions (buyer_id, transaction_date, description, transaction_type, credit_amount, debit_amount, running_balance, policy_entry_id, created_by) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?)");
-                            $s->bind_param("isssddii", $buyerId, $entryDate, $cd, $ct, $buyerCommAmt, $z, $newId, $user_id);
-                            $s->execute();
-                            $s->close();
-                        }
 
                         // auto-post payment_in bank txn -> payment-in account
                         if ($payInBankId && $payIn > 0) {
@@ -1965,10 +1866,6 @@ if (isset($_GET['action'])) {
                             $s->close();
                             $banksTouched[$payOutBankId] = 1;
                         }
-
-                        // recompute balances from ledgers
-                        if ($agentId && $agentCommAmt > 0) recalcAgentBalances($conn, $agentId);
-                        if ($buyerId && $buyerCommAmt > 0) recalcBuyerBalances($conn, $buyerId);
 
                         // notify admins + assigned agent (inside row txn)
                         notifyPolicyAdded($conn, $newId, $policyNumber, $agentId, $agentName);

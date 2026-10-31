@@ -563,13 +563,8 @@ if (isset($_GET['action'])) {
                     (SELECT COUNT(*) FROM policy_documents WHERE uploaded_by = ?) +
                     (SELECT COUNT(*) FROM expenses WHERE created_by = ?) +
                     (SELECT COUNT(*) FROM bank_transactions WHERE created_by = ?) +
-                    (SELECT COUNT(*) FROM agent_transactions WHERE created_by = ?) +
-                    (SELECT COUNT(*) FROM buyer_transactions WHERE created_by = ?) +
-                    (SELECT COUNT(*) FROM other_income WHERE created_by = ?) +
-                    (SELECT COUNT(*) FROM buyer_payout_charts WHERE created_by = ?) +
-                    (SELECT COUNT(*) FROM agent_payout_charts WHERE created_by = ?) +
-                    (SELECT COUNT(*) FROM payout_chart_uploads WHERE uploaded_by = ?) as cnt");
-                $stmt->bind_param("iiiiiiiiii", $uid, $uid, $uid, $uid, $uid, $uid, $uid, $uid, $uid, $uid);
+                    (SELECT COUNT(*) FROM other_income WHERE created_by = ?) as cnt");
+                $stmt->bind_param("iiiii", $uid, $uid, $uid, $uid, $uid);
                 $stmt->execute();
                 $linked = $stmt->get_result()->fetch_assoc()['cnt'];
                 $stmt->close();
@@ -623,13 +618,8 @@ if (isset($_GET['action'])) {
                         (SELECT COUNT(*) FROM policy_documents WHERE uploaded_by = ?) +
                         (SELECT COUNT(*) FROM expenses WHERE created_by = ?) +
                         (SELECT COUNT(*) FROM bank_transactions WHERE created_by = ?) +
-                        (SELECT COUNT(*) FROM agent_transactions WHERE created_by = ?) +
-                        (SELECT COUNT(*) FROM buyer_transactions WHERE created_by = ?) +
-                        (SELECT COUNT(*) FROM other_income WHERE created_by = ?) +
-                        (SELECT COUNT(*) FROM buyer_payout_charts WHERE created_by = ?) +
-                        (SELECT COUNT(*) FROM agent_payout_charts WHERE created_by = ?) +
-                        (SELECT COUNT(*) FROM payout_chart_uploads WHERE uploaded_by = ?) as cnt");
-                    $stmt->bind_param("iiiiiiiiii", $uid, $uid, $uid, $uid, $uid, $uid, $uid, $uid, $uid, $uid);
+                        (SELECT COUNT(*) FROM other_income WHERE created_by = ?) as cnt");
+                    $stmt->bind_param("iiiii", $uid, $uid, $uid, $uid, $uid);
                     $stmt->execute();
                     $linked = $stmt->get_result()->fetch_assoc()['cnt'];
                     $stmt->close();

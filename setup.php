@@ -193,23 +193,6 @@ function setupSchema($conn)
         INDEX idx_agent_code (agent_code)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
-    createTable($conn, 'buyers', "CREATE TABLE IF NOT EXISTS buyers (
-        id BIGINT AUTO_INCREMENT PRIMARY KEY,
-        company_name VARCHAR(200) NOT NULL,
-        company_code VARCHAR(30) NOT NULL UNIQUE,
-        contact_person VARCHAR(150) NULL,
-        mobile VARCHAR(15) NULL,
-        email VARCHAR(200) NULL,
-        address TEXT NULL,
-        gst_number VARCHAR(15) NULL,
-        wallet_balance DECIMAL(14,2) DEFAULT 0.00,
-        outstanding_balance DECIMAL(14,2) DEFAULT 0.00,
-        is_active BOOLEAN DEFAULT TRUE,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        INDEX idx_company_code (company_code)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
     createTable($conn, 'customers', "CREATE TABLE IF NOT EXISTS customers (
         id BIGINT AUTO_INCREMENT PRIMARY KEY,
         name VARCHAR(150) NOT NULL,
@@ -289,7 +272,6 @@ function setupSchema($conn)
         customer_name VARCHAR(150) NOT NULL,
         agent_id BIGINT NULL,
         agent_name VARCHAR(150) NULL,
-        buyer_id BIGINT NOT NULL,
         company_name VARCHAR(200) NOT NULL,
         company_code VARCHAR(30) NOT NULL,
         policy_number VARCHAR(50) NOT NULL UNIQUE,
@@ -321,14 +303,6 @@ function setupSchema($conn)
         nominee_name VARCHAR(150) NULL,
         nominee_relation VARCHAR(50) NULL,
         nominee_dob DATE NULL,
-        -- Commission & Accounts
-        buyer_commission_basis ENUM('premium_pct','tp_pct','od_pct','net_pct','fixed') NOT NULL,
-        buyer_commission_rate DECIMAL(8,4) NOT NULL,
-        buyer_commission_amount DECIMAL(12,2) NOT NULL,
-        agent_commission_basis ENUM('premium_pct','tp_pct','od_pct','net_pct','fixed') NULL,
-        agent_commission_rate DECIMAL(8,4) NULL,
-        agent_commission_amount DECIMAL(12,2) DEFAULT 0.00,
-        is_commission_manual BOOLEAN DEFAULT FALSE,
         bank_account_id BIGINT NULL,
         bank_name VARCHAR(100) NULL,
         payment_in DECIMAL(12,2) DEFAULT 0.00,
@@ -347,7 +321,6 @@ function setupSchema($conn)
         FOREIGN KEY (vehicle_id) REFERENCES vehicles(id) ON DELETE SET NULL,
         FOREIGN KEY (customer_id) REFERENCES customers(id) ON DELETE RESTRICT,
         FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE SET NULL,
-        FOREIGN KEY (buyer_id) REFERENCES buyers(id) ON DELETE RESTRICT,
         FOREIGN KEY (bank_account_id) REFERENCES bank_accounts(id) ON DELETE SET NULL,
         FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT,
         INDEX idx_insurance_category (insurance_category),
@@ -430,93 +403,6 @@ function setupSchema($conn)
         FOREIGN KEY (expense_id) REFERENCES expenses(id) ON DELETE SET NULL,
         FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT,
         INDEX idx_bank_account_id (bank_account_id),
-        INDEX idx_transaction_date (transaction_date)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
-    createTable($conn, 'buyer_payout_charts', "CREATE TABLE IF NOT EXISTS buyer_payout_charts (
-        id BIGINT AUTO_INCREMENT PRIMARY KEY,
-        buyer_id BIGINT NOT NULL,
-        vehicle_type VARCHAR(50) NOT NULL,
-        month TINYINT NOT NULL,
-        year SMALLINT NOT NULL,
-        commission_basis ENUM('premium_pct','tp_pct','od_pct','net_pct','fixed') NOT NULL,
-        commission_rate DECIMAL(8,4) NOT NULL,
-        is_active BOOLEAN DEFAULT TRUE,
-        uploaded_via ENUM('manual','bulk_upload') DEFAULT 'manual',
-        created_by BIGINT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (buyer_id) REFERENCES buyers(id) ON DELETE CASCADE,
-        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT,
-        UNIQUE KEY uk_buyer_vtype_month_year (buyer_id, vehicle_type, month, year)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
-    createTable($conn, 'agent_payout_charts', "CREATE TABLE IF NOT EXISTS agent_payout_charts (
-        id BIGINT AUTO_INCREMENT PRIMARY KEY,
-        agent_id BIGINT NULL,
-        buyer_id BIGINT NULL,
-        vehicle_type VARCHAR(50) NOT NULL,
-        month TINYINT NOT NULL,
-        year SMALLINT NOT NULL,
-        commission_basis ENUM('premium_pct','tp_pct','od_pct','net_pct','fixed') NOT NULL,
-        commission_rate DECIMAL(8,4) NOT NULL,
-        is_custom BOOLEAN DEFAULT FALSE,
-        is_active BOOLEAN DEFAULT TRUE,
-        uploaded_via ENUM('manual','bulk_upload') DEFAULT 'manual',
-        created_by BIGINT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
-        FOREIGN KEY (buyer_id) REFERENCES buyers(id) ON DELETE CASCADE,
-        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT,
-        UNIQUE KEY uk_agent_buyer_vtype_month_year (agent_id, buyer_id, vehicle_type, month, year)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
-    createTable($conn, 'agent_transactions', "CREATE TABLE IF NOT EXISTS agent_transactions (
-        id BIGINT AUTO_INCREMENT PRIMARY KEY,
-        agent_id BIGINT NOT NULL,
-        transaction_date DATE NOT NULL,
-        description VARCHAR(500) NOT NULL,
-        transaction_type ENUM('commission','payment_in','payment_out','adjustment') NOT NULL,
-        credit_amount DECIMAL(12,2) DEFAULT 0.00,
-        debit_amount DECIMAL(12,2) DEFAULT 0.00,
-        running_balance DECIMAL(14,2) NOT NULL,
-        policy_entry_id BIGINT NULL,
-        payment_mode VARCHAR(30) NULL,
-        reference_number VARCHAR(50) NULL,
-        bank_account_id BIGINT NULL,
-        bank_txn_id BIGINT NULL,
-        is_linked_mirror TINYINT(1) NOT NULL DEFAULT 0,
-        created_by BIGINT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (agent_id) REFERENCES agents(id) ON DELETE CASCADE,
-        FOREIGN KEY (policy_entry_id) REFERENCES policy_entries(id) ON DELETE SET NULL,
-        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT,
-        INDEX idx_agent_id (agent_id),
-        INDEX idx_transaction_date (transaction_date)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
-    createTable($conn, 'buyer_transactions', "CREATE TABLE IF NOT EXISTS buyer_transactions (
-        id BIGINT AUTO_INCREMENT PRIMARY KEY,
-        buyer_id BIGINT NOT NULL,
-        transaction_date DATE NOT NULL,
-        description VARCHAR(500) NOT NULL,
-        transaction_type ENUM('commission_receivable','payment_received','payment_made','adjustment') NOT NULL,
-        credit_amount DECIMAL(12,2) DEFAULT 0.00,
-        debit_amount DECIMAL(12,2) DEFAULT 0.00,
-        running_balance DECIMAL(14,2) NOT NULL,
-        policy_entry_id BIGINT NULL,
-        payment_mode VARCHAR(30) NULL,
-        reference_number VARCHAR(50) NULL,
-        bank_account_id BIGINT NULL,
-        bank_txn_id BIGINT NULL,
-        is_linked_mirror TINYINT(1) NOT NULL DEFAULT 0,
-        created_by BIGINT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (buyer_id) REFERENCES buyers(id) ON DELETE CASCADE,
-        FOREIGN KEY (policy_entry_id) REFERENCES policy_entries(id) ON DELETE SET NULL,
-        FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE RESTRICT,
-        INDEX idx_buyer_id (buyer_id),
         INDEX idx_transaction_date (transaction_date)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
@@ -985,14 +871,112 @@ function setupSchema($conn)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 }
 
+// Safe removal of Brokerage, Buyers & Commission schema for pure Policy Management
+function cleanupBrokerageAndCommissionSchema($conn)
+{
+    echo '<br><div class="log-item log-info"><i class="fas fa-trash-alt"></i> <strong>Cleaning up Brokerage, Buyers & Commission schema...</strong></div>';
+
+    // 1. Drop foreign key constraints referencing buyers or on policy_entries.buyer_id
+    try {
+        $dbRes = $conn->query("SELECT DATABASE() as db");
+        $dbName = ($dbRes && ($dbRow = $dbRes->fetch_assoc())) ? $dbRow['db'] : '';
+        if ($dbName) {
+            $fkQ = "SELECT TABLE_NAME, CONSTRAINT_NAME 
+                    FROM information_schema.KEY_COLUMN_USAGE 
+                    WHERE TABLE_SCHEMA = '$dbName' 
+                      AND (REFERENCED_TABLE_NAME = 'buyers' OR (TABLE_NAME = 'policy_entries' AND COLUMN_NAME = 'buyer_id'))";
+            $fkRes = $conn->query($fkQ);
+            if ($fkRes) {
+                while ($fk = $fkRes->fetch_assoc()) {
+                    $tbl = $fk['TABLE_NAME'];
+                    $cName = $fk['CONSTRAINT_NAME'];
+                    @$conn->query("ALTER TABLE `$tbl` DROP FOREIGN KEY `$cName`");
+                }
+            }
+        }
+    } catch (\Throwable $e) {}
+
+    // 2. Drop foreign keys on tables being removed
+    try {
+        if (!empty($dbName)) {
+            $fkQ2 = "SELECT TABLE_NAME, CONSTRAINT_NAME 
+                     FROM information_schema.KEY_COLUMN_USAGE 
+                     WHERE TABLE_SCHEMA = '$dbName' 
+                       AND TABLE_NAME IN ('buyer_transactions', 'agent_transactions', 'buyer_payout_charts', 'agent_payout_charts') 
+                       AND CONSTRAINT_NAME != 'PRIMARY'";
+            $fkRes2 = $conn->query($fkQ2);
+            if ($fkRes2) {
+                while ($fk = $fkRes2->fetch_assoc()) {
+                    $tbl = $fk['TABLE_NAME'];
+                    $cName = $fk['CONSTRAINT_NAME'];
+                    @$conn->query("ALTER TABLE `$tbl` DROP FOREIGN KEY `$cName`");
+                }
+            }
+        }
+    } catch (\Throwable $e) {}
+
+    // 3. Drop tables: buyer_transactions, buyer_payout_charts, agent_payout_charts, agent_transactions, buyers
+    $dropTables = ['buyer_transactions', 'buyer_payout_charts', 'agent_payout_charts', 'agent_transactions', 'buyers'];
+    foreach ($dropTables as $tbl) {
+        try {
+            $chk = $conn->query("SHOW TABLES LIKE '$tbl'");
+            if ($chk && $chk->num_rows > 0) {
+                $conn->query("DROP TABLE IF EXISTS `$tbl`");
+                echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Successfully dropped table: <code>' . htmlspecialchars($tbl) . '</code></div>';
+            }
+        } catch (\Throwable $e) {
+            echo '<div class="log-item log-warning"><i class="fas fa-exclamation-triangle"></i> Notice dropping ' . htmlspecialchars($tbl) . ': ' . htmlspecialchars($e->getMessage()) . '</div>';
+        }
+    }
+
+    // 4. Drop brokerage and commission columns from policy_entries
+    $colsToDrop = [
+        'buyer_id',
+        'buyer_commission_basis',
+        'buyer_commission_rate',
+        'buyer_commission_amount',
+        'agent_commission_basis',
+        'agent_commission_rate',
+        'agent_commission_amount',
+        'is_commission_manual'
+    ];
+
+    $existingCols = [];
+    try {
+        $cRes = $conn->query("SHOW COLUMNS FROM policy_entries");
+        if ($cRes) {
+            while ($cRow = $cRes->fetch_assoc()) {
+                $existingCols[] = $cRow['Field'];
+            }
+        }
+    } catch (\Throwable $e) {}
+
+    foreach ($colsToDrop as $col) {
+        if (in_array($col, $existingCols, true)) {
+            try {
+                // Drop index if any exists on this column
+                $idxRes = $conn->query("SHOW INDEX FROM policy_entries WHERE Column_name = '$col'");
+                if ($idxRes) {
+                    while ($idxRow = $idxRes->fetch_assoc()) {
+                        $keyName = $idxRow['Key_name'];
+                        if ($keyName !== 'PRIMARY') {
+                            @$conn->query("ALTER TABLE policy_entries DROP INDEX `$keyName`");
+                        }
+                    }
+                }
+                $conn->query("ALTER TABLE policy_entries DROP COLUMN `$col`");
+                echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Successfully dropped column: <code>policy_entries.' . htmlspecialchars($col) . '</code></div>';
+            } catch (\Throwable $e) {
+                echo '<div class="log-item log-warning"><i class="fas fa-exclamation-triangle"></i> Notice dropping column ' . htmlspecialchars($col) . ': ' . htmlspecialchars($e->getMessage()) . '</div>';
+            }
+        }
+    }
+}
+
 // additive column/index/seed-setting fixups for existing installs
 function setupColumnFixups($conn)
 {
     echo '<br><div class="log-item log-info"><i class="fas fa-wrench"></i> <strong>Verifying columns on existing tables...</strong></div>';
-
-    addColumnIfNotExists($conn, 'buyers', 'company_code', "VARCHAR(30) NOT NULL DEFAULT '' AFTER company_name");
-    addIndexIfNotExists($conn, 'buyers', 'idx_company_code', 'company_code');
-    addColumnIfNotExists($conn, 'buyers', 'outstanding_balance', "DECIMAL(14,2) DEFAULT 0.00 AFTER wallet_balance");
 
     addColumnIfNotExists($conn, 'agents', 'outstanding_balance', "DECIMAL(14,2) DEFAULT 0.00 AFTER wallet_balance");
 
@@ -1017,25 +1001,9 @@ function setupColumnFixups($conn)
     addIndexIfNotExists($conn, 'policy_entries', 'idx_pe_pay_out_bank', 'payment_out_bank_account_id');
     addColumnIfNotExists($conn, 'policy_entries', 'remarks', "TEXT NULL AFTER status");
 
-    addColumnIfNotExists($conn, 'agent_transactions', 'policy_entry_id', "BIGINT NULL AFTER running_balance");
-    addColumnIfNotExists($conn, 'buyer_transactions', 'policy_entry_id', "BIGINT NULL AFTER running_balance");
     addColumnIfNotExists($conn, 'bank_transactions', 'category', "VARCHAR(50) NULL AFTER expense_id");
-
-    // bank <-> agent/buyer interconnection (double-entry link)
     addColumnIfNotExists($conn, 'bank_transactions', 'agent_id', "BIGINT NULL AFTER category");
-    addColumnIfNotExists($conn, 'bank_transactions', 'buyer_id', "BIGINT NULL AFTER agent_id");
-    addColumnIfNotExists($conn, 'bank_transactions', 'link_txn_id', "BIGINT NULL AFTER buyer_id");
-    addColumnIfNotExists($conn, 'bank_transactions', 'is_linked_mirror', "TINYINT(1) NOT NULL DEFAULT 0 AFTER link_txn_id");
-    addColumnIfNotExists($conn, 'agent_transactions', 'bank_account_id', "BIGINT NULL AFTER reference_number");
-    addColumnIfNotExists($conn, 'agent_transactions', 'bank_txn_id', "BIGINT NULL AFTER bank_account_id");
-    addColumnIfNotExists($conn, 'agent_transactions', 'is_linked_mirror', "TINYINT(1) NOT NULL DEFAULT 0 AFTER bank_txn_id");
-    addColumnIfNotExists($conn, 'buyer_transactions', 'bank_account_id', "BIGINT NULL AFTER reference_number");
-    addColumnIfNotExists($conn, 'buyer_transactions', 'bank_txn_id', "BIGINT NULL AFTER bank_account_id");
-    addColumnIfNotExists($conn, 'buyer_transactions', 'is_linked_mirror', "TINYINT(1) NOT NULL DEFAULT 0 AFTER bank_txn_id");
     addIndexIfNotExists($conn, 'bank_transactions', 'idx_bt_agent', 'agent_id');
-    addIndexIfNotExists($conn, 'bank_transactions', 'idx_bt_buyer', 'buyer_id');
-    addIndexIfNotExists($conn, 'agent_transactions', 'idx_at_bank', 'bank_account_id');
-    addIndexIfNotExists($conn, 'buyer_transactions', 'idx_but_bank', 'bank_account_id');
 
     addColumnIfNotExists($conn, 'users', 'theme_primary', "VARCHAR(20) DEFAULT '#001f3f' AFTER profile_image");
     addColumnIfNotExists($conn, 'users', 'theme_secondary', "VARCHAR(20) DEFAULT '#003366' AFTER theme_primary");
@@ -1059,10 +1027,6 @@ function setupColumnFixups($conn)
         ['agents', 'tds_rate', "DECIMAL(5,2) NOT NULL DEFAULT 5.00 AFTER license_expiry_date"],
         ['agents', 'joining_date', "DATE NULL AFTER tds_rate"],
         ['agents', 'upi_id', "VARCHAR(60) NULL AFTER ifsc_code"],
-        ['buyers', 'pan_number', "VARCHAR(10) NULL AFTER gst_number"],
-        ['buyers', 'tds_rate', "DECIMAL(5,2) NOT NULL DEFAULT 2.00 AFTER pan_number"],
-        ['buyers', 'payment_terms_days', "SMALLINT NULL AFTER tds_rate"],
-        ['buyers', 'state', "VARCHAR(100) NULL AFTER address"],
         ['customers', 'agent_id', "BIGINT NULL AFTER referred_by"],
         ['customers', 'ckyc_number', "VARCHAR(20) NULL AFTER state"],
         ['customers', 'whatsapp_number', "VARCHAR(15) NULL AFTER mobile"],
@@ -1102,19 +1066,10 @@ function setupColumnFixups($conn)
         ['bank_transactions', 'reconciled_at', "DATETIME NULL AFTER is_reconciled"],
         ['bank_transactions', 'updated_at', "DATETIME NULL ON UPDATE CURRENT_TIMESTAMP"],
         ['bank_transactions', 'updated_by', "BIGINT NULL"],
-        ['agent_transactions', 'tds_amount', "DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER debit_amount"],
-        ['agent_transactions', 'updated_at', "DATETIME NULL ON UPDATE CURRENT_TIMESTAMP"],
-        ['agent_transactions', 'updated_by', "BIGINT NULL"],
-        ['buyer_transactions', 'tds_amount', "DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER debit_amount"],
-        ['buyer_transactions', 'gst_amount', "DECIMAL(12,2) NOT NULL DEFAULT 0.00 AFTER tds_amount"],
-        ['buyer_transactions', 'invoice_number', "VARCHAR(50) NULL AFTER reference_number"],
-        ['buyer_transactions', 'updated_at', "DATETIME NULL ON UPDATE CURRENT_TIMESTAMP"],
-        ['buyer_transactions', 'updated_by', "BIGINT NULL"],
         ['other_income', 'remarks', "VARCHAR(500) NULL AFTER source"],
         ['other_income', 'updated_by', "BIGINT NULL AFTER created_by"],
         ['notifications', 'read_at', "DATETIME NULL AFTER is_read"],
         ['point_transactions', 'created_by', "BIGINT NULL"],
-        ['payout_chart_uploads', 'completed_at', "DATETIME NULL"],
         ['system_settings', 'updated_by', "BIGINT NULL"],
         ['login_attempts', 'is_success', "BOOLEAN NOT NULL DEFAULT FALSE"],
         ['todos', 'completed_at', "DATETIME NULL"],
@@ -1198,14 +1153,13 @@ function setupColumnFixups($conn)
     @$conn->query("ALTER TABLE reminder_schedules MODIFY COLUMN agent_id BIGINT NULL");
     @$conn->query("ALTER TABLE customer_followups MODIFY COLUMN agent_id BIGINT NULL");
 
-    // Make vehicle and commission fields nullable / defaulted for pure policy management
+    // Make vehicle fields nullable for health/life policies
     @$conn->query("ALTER TABLE policy_entries MODIFY COLUMN vehicle_id BIGINT NULL");
     @$conn->query("ALTER TABLE policy_entries MODIFY COLUMN vehicle_number VARCHAR(20) NULL");
     @$conn->query("ALTER TABLE policy_entries MODIFY COLUMN vehicle_type VARCHAR(50) NULL");
-    @$conn->query("ALTER TABLE policy_entries MODIFY COLUMN buyer_id BIGINT NULL");
-    @$conn->query("ALTER TABLE policy_entries MODIFY COLUMN buyer_commission_basis VARCHAR(50) NULL DEFAULT 'fixed'");
-    @$conn->query("ALTER TABLE policy_entries MODIFY COLUMN buyer_commission_rate DECIMAL(8,4) NULL DEFAULT 0.0000");
-    @$conn->query("ALTER TABLE policy_entries MODIFY COLUMN buyer_commission_amount DECIMAL(12,2) NULL DEFAULT 0.00");
+
+    // Clean up brokerage, buyers, and commission tables/columns
+    cleanupBrokerageAndCommissionSchema($conn);
 
     addIndexIfNotExists($conn, 'policy_entries', 'idx_insurance_category', 'insurance_category');
     addIndexIfNotExists($conn, 'claims', 'idx_claim_category', 'claim_category');
@@ -2079,6 +2033,17 @@ function recalcBankLedger($conn, $bankId)
                 echo '<a href="login.php" class="btn"><i class="fas fa-sign-in-alt"></i> Go to Login Page</a>';
                 echo ' <a href="setup.php" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Back</a>';
 
+            } elseif ($action === 'clean_brokerage_schema') {
+                echo '<h2><i class="fas fa-trash-alt"></i> Database Cleanup</h2>';
+                echo '<p class="subtitle">Safely dropping Brokerage, Buyers &amp; Commission tables and columns while preserving all policies and customers.</p><hr>';
+                $conn = setupConn();
+                echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Database connection successful</div>';
+                cleanupBrokerageAndCommissionSchema($conn);
+                $conn->close();
+                echo '<br><div class="log-item log-success"><i class="fas fa-check-circle"></i> <strong>Brokerage and Commission cleanup completed successfully!</strong></div>';
+                echo '<a href="dashboard.php" class="btn btn-primary"><i class="fas fa-gauge-high"></i> Go to Dashboard</a>';
+                echo ' <a href="setup.php" class="btn btn-secondary"><i class="fas fa-arrow-left"></i> Back to Setup</a>';
+
             } elseif ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'reset' && ($_POST['confirm'] ?? '') === 'yes' && hash_equals($_SESSION['setup_tok'] ?? '', $_POST['tok'] ?? '')) {
                 unset($_SESSION['setup_tok']); // single use
                 echo '<h2><i class="fas fa-database"></i> Database Reset</h2>';
@@ -2111,6 +2076,7 @@ function recalcBankLedger($conn, $bankId)
                 }
                 echo '<div class="setup-actions">';
                 echo '<a href="setup.php?action=update" class="btn btn-primary"><i class="fas fa-sync-alt"></i> Run Update (Safe)</a>';
+                echo '<a href="setup.php?action=clean_brokerage_schema" class="btn" style="background:#0284c7;color:#fff;"><i class="fas fa-trash-alt"></i> Clean Brokerage &amp; Commission Schema</a>';
                 $_SESSION['setup_tok'] = bin2hex(random_bytes(16));
                 echo '<form method="post" action="setup.php" id="resetForm"><input type="hidden" name="action" value="reset"><input type="hidden" name="confirm" value="yes"><input type="hidden" name="tok" value="' . $_SESSION['setup_tok'] . '"></form>';
                 echo '<button type="button" class="btn btn-danger" onclick="confirmReset()"><i class="fas fa-triangle-exclamation"></i> Drop All &amp; Reseed (Destructive)</button>';

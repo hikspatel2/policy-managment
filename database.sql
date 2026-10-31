@@ -122,31 +122,6 @@ CREATE TABLE `agents` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------
--- Table: buyers
--- ------------------------------------------------------------
-DROP TABLE IF EXISTS `buyers`;
-CREATE TABLE `buyers` (
-  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-  `company_name` VARCHAR(200) NOT NULL,
-  `company_code` VARCHAR(30) NOT NULL UNIQUE,
-  `contact_person` VARCHAR(150) NULL,
-  `mobile` VARCHAR(15) NULL,
-  `email` VARCHAR(200) NULL,
-  `address` TEXT NULL,
-  `state` VARCHAR(100) NULL,
-  `gst_number` VARCHAR(15) NULL,
-  `pan_number` VARCHAR(10) NULL,
-  `tds_rate` DECIMAL(5,2) NOT NULL DEFAULT 2.00,
-  `payment_terms_days` SMALLINT NULL,
-  `wallet_balance` DECIMAL(14,2) DEFAULT 0.00,
-  `outstanding_balance` DECIMAL(14,2) DEFAULT 0.00,
-  `is_active` BOOLEAN DEFAULT TRUE,
-  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  INDEX `idx_company_code` (`company_code`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ------------------------------------------------------------
 -- Table: customers
 -- ------------------------------------------------------------
 DROP TABLE IF EXISTS `customers`;
@@ -270,7 +245,6 @@ CREATE TABLE `policy_entries` (
   `customer_name` VARCHAR(150) NOT NULL,
   `agent_id` BIGINT NULL,
   `agent_name` VARCHAR(150) NULL,
-  `buyer_id` BIGINT NOT NULL,
   `company_name` VARCHAR(200) NOT NULL,
   `company_code` VARCHAR(30) NOT NULL,
   `policy_number` VARCHAR(50) NOT NULL UNIQUE,
@@ -302,14 +276,6 @@ CREATE TABLE `policy_entries` (
   `nominee_name` VARCHAR(150) NULL,
   `nominee_relation` VARCHAR(50) NULL,
   `nominee_dob` DATE NULL,
-  -- Commission & Accounting
-  `buyer_commission_basis` ENUM('premium_pct','tp_pct','od_pct','net_pct','fixed') NOT NULL,
-  `buyer_commission_rate` DECIMAL(8,4) NOT NULL,
-  `buyer_commission_amount` DECIMAL(12,2) NOT NULL,
-  `agent_commission_basis` ENUM('premium_pct','tp_pct','od_pct','net_pct','fixed') NULL,
-  `agent_commission_rate` DECIMAL(8,4) NULL,
-  `agent_commission_amount` DECIMAL(12,2) DEFAULT 0.00,
-  `is_commission_manual` BOOLEAN DEFAULT FALSE,
   `bank_account_id` BIGINT NULL,
   `bank_name` VARCHAR(100) NULL,
   `payment_in` DECIMAL(12,2) DEFAULT 0.00,
@@ -340,7 +306,6 @@ CREATE TABLE `policy_entries` (
   FOREIGN KEY (`vehicle_id`) REFERENCES `vehicles`(`id`) ON DELETE SET NULL,
   FOREIGN KEY (`customer_id`) REFERENCES `customers`(`id`) ON DELETE RESTRICT,
   FOREIGN KEY (`agent_id`) REFERENCES `agents`(`id`) ON DELETE SET NULL,
-  FOREIGN KEY (`buyer_id`) REFERENCES `buyers`(`id`) ON DELETE RESTRICT,
   FOREIGN KEY (`bank_account_id`) REFERENCES `bank_accounts`(`id`) ON DELETE SET NULL,
   FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE RESTRICT,
   INDEX `idx_insurance_category` (`insurance_category`),
@@ -349,7 +314,6 @@ CREATE TABLE `policy_entries` (
   INDEX `idx_branch_id` (`branch_id`),
   INDEX `idx_customer_id` (`customer_id`),
   INDEX `idx_agent_id` (`agent_id`),
-  INDEX `idx_buyer_id` (`buyer_id`),
   INDEX `idx_status` (`status`),
   INDEX `idx_policy_dates` (`policy_start_date`, `policy_end_date`),
   INDEX `idx_prev_policy` (`previous_policy_id`),
@@ -468,7 +432,6 @@ CREATE TABLE `bank_transactions` (
   `other_income_id` BIGINT NULL,
   `category` VARCHAR(50) NULL,
   `agent_id` BIGINT NULL,
-  `buyer_id` BIGINT NULL,
   `link_txn_id` BIGINT NULL,
   `is_linked_mirror` TINYINT(1) NOT NULL DEFAULT 0,
   `is_reconciled` BOOLEAN NOT NULL DEFAULT FALSE,
@@ -484,122 +447,8 @@ CREATE TABLE `bank_transactions` (
   INDEX `idx_bank_account_id` (`bank_account_id`),
   INDEX `idx_transaction_date` (`transaction_date`),
   INDEX `idx_bt_agent` (`agent_id`),
-  INDEX `idx_bt_buyer` (`buyer_id`),
   INDEX `idx_other_income` (`other_income_id`),
   INDEX `idx_reconciled` (`is_reconciled`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ------------------------------------------------------------
--- Table: buyer_payout_charts
--- ------------------------------------------------------------
-DROP TABLE IF EXISTS `buyer_payout_charts`;
-CREATE TABLE `buyer_payout_charts` (
-  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-  `buyer_id` BIGINT NOT NULL,
-  `vehicle_type` VARCHAR(50) NOT NULL,
-  `month` TINYINT NOT NULL,
-  `year` SMALLINT NOT NULL,
-  `commission_basis` ENUM('premium_pct','tp_pct','od_pct','net_pct','fixed') NOT NULL,
-  `commission_rate` DECIMAL(8,4) NOT NULL,
-  `is_active` BOOLEAN DEFAULT TRUE,
-  `uploaded_via` ENUM('manual','bulk_upload') DEFAULT 'manual',
-  `created_by` BIGINT NOT NULL,
-  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (`buyer_id`) REFERENCES `buyers`(`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE RESTRICT,
-  UNIQUE KEY `uk_buyer_vtype_month_year` (`buyer_id`, `vehicle_type`, `month`, `year`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ------------------------------------------------------------
--- Table: agent_payout_charts
--- ------------------------------------------------------------
-DROP TABLE IF EXISTS `agent_payout_charts`;
-CREATE TABLE `agent_payout_charts` (
-  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-  `agent_id` BIGINT NULL,
-  `buyer_id` BIGINT NULL,
-  `vehicle_type` VARCHAR(50) NOT NULL,
-  `month` TINYINT NOT NULL,
-  `year` SMALLINT NOT NULL,
-  `commission_basis` ENUM('premium_pct','tp_pct','od_pct','net_pct','fixed') NOT NULL,
-  `commission_rate` DECIMAL(8,4) NOT NULL,
-  `is_custom` BOOLEAN DEFAULT FALSE,
-  `is_active` BOOLEAN DEFAULT TRUE,
-  `uploaded_via` ENUM('manual','bulk_upload') DEFAULT 'manual',
-  `created_by` BIGINT NOT NULL,
-  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (`agent_id`) REFERENCES `agents`(`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`buyer_id`) REFERENCES `buyers`(`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE RESTRICT,
-  UNIQUE KEY `uk_agent_buyer_vtype_month_year` (`agent_id`, `buyer_id`, `vehicle_type`, `month`, `year`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ------------------------------------------------------------
--- Table: agent_transactions
--- ------------------------------------------------------------
-DROP TABLE IF EXISTS `agent_transactions`;
-CREATE TABLE `agent_transactions` (
-  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-  `agent_id` BIGINT NOT NULL,
-  `transaction_date` DATE NOT NULL,
-  `description` VARCHAR(500) NOT NULL,
-  `transaction_type` ENUM('commission','payment_in','payment_out','adjustment') NOT NULL,
-  `credit_amount` DECIMAL(12,2) DEFAULT 0.00,
-  `debit_amount` DECIMAL(12,2) DEFAULT 0.00,
-  `tds_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
-  `running_balance` DECIMAL(14,2) NOT NULL,
-  `policy_entry_id` BIGINT NULL,
-  `payment_mode` VARCHAR(30) NULL,
-  `reference_number` VARCHAR(50) NULL,
-  `bank_account_id` BIGINT NULL,
-  `bank_txn_id` BIGINT NULL,
-  `is_linked_mirror` TINYINT(1) NOT NULL DEFAULT 0,
-  `created_by` BIGINT NOT NULL,
-  `updated_by` BIGINT NULL,
-  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME NULL ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (`agent_id`) REFERENCES `agents`(`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`policy_entry_id`) REFERENCES `policy_entries`(`id`) ON DELETE SET NULL,
-  FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE RESTRICT,
-  INDEX `idx_agent_id` (`agent_id`),
-  INDEX `idx_transaction_date` (`transaction_date`),
-  INDEX `idx_at_bank` (`bank_account_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ------------------------------------------------------------
--- Table: buyer_transactions
--- ------------------------------------------------------------
-DROP TABLE IF EXISTS `buyer_transactions`;
-CREATE TABLE `buyer_transactions` (
-  `id` BIGINT AUTO_INCREMENT PRIMARY KEY,
-  `buyer_id` BIGINT NOT NULL,
-  `transaction_date` DATE NOT NULL,
-  `description` VARCHAR(500) NOT NULL,
-  `transaction_type` ENUM('commission_receivable','payment_received','payment_made','adjustment') NOT NULL,
-  `credit_amount` DECIMAL(12,2) DEFAULT 0.00,
-  `debit_amount` DECIMAL(12,2) DEFAULT 0.00,
-  `tds_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
-  `gst_amount` DECIMAL(12,2) NOT NULL DEFAULT 0.00,
-  `running_balance` DECIMAL(14,2) NOT NULL,
-  `policy_entry_id` BIGINT NULL,
-  `payment_mode` VARCHAR(30) NULL,
-  `reference_number` VARCHAR(50) NULL,
-  `invoice_number` VARCHAR(50) NULL,
-  `bank_account_id` BIGINT NULL,
-  `bank_txn_id` BIGINT NULL,
-  `is_linked_mirror` TINYINT(1) NOT NULL DEFAULT 0,
-  `created_by` BIGINT NOT NULL,
-  `updated_by` BIGINT NULL,
-  `created_at` DATETIME DEFAULT CURRENT_TIMESTAMP,
-  `updated_at` DATETIME NULL ON UPDATE CURRENT_TIMESTAMP,
-  FOREIGN KEY (`buyer_id`) REFERENCES `buyers`(`id`) ON DELETE CASCADE,
-  FOREIGN KEY (`policy_entry_id`) REFERENCES `policy_entries`(`id`) ON DELETE SET NULL,
-  FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON DELETE RESTRICT,
-  INDEX `idx_buyer_id` (`buyer_id`),
-  INDEX `idx_transaction_date` (`transaction_date`),
-  INDEX `idx_but_bank` (`bank_account_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ------------------------------------------------------------
@@ -952,14 +801,6 @@ INSERT INTO `agents` (`id`, `user_id`, `branch_id`, `agent_code`, `name`, `mobil
 (1, 4, 1, 'AGT-0001', 'Agent 1', '03001000004', 'agent1@demo.com', 'State A', 0.00, 0.00),
 (2, 5, 2, 'AGT-0002', 'Agent 2', '03001000005', 'agent2@demo.com', 'State B', 0.00, 0.00),
 (3, 6, 3, 'AGT-0003', 'Agent 3', '03001000006', 'agent3@demo.com', 'State A', 0.00, 0.00);
-
--- Buyers
-INSERT INTO `buyers` (`id`, `company_name`, `company_code`, `contact_person`, `mobile`, `email`, `wallet_balance`, `outstanding_balance`) VALUES
-(1, 'Company 1', 'CMP1', 'Contact 1', '0211000001', 'company1@demo.com', 0.00, 0.00),
-(2, 'Company 2', 'CMP2', 'Contact 2', '0211000002', 'company2@demo.com', 0.00, 0.00),
-(3, 'Company 3', 'CMP3', 'Contact 3', '0211000003', 'company3@demo.com', 0.00, 0.00),
-(4, 'Company 4', 'CMP4', 'Contact 4', '0211000004', 'company4@demo.com', 0.00, 0.00),
-(5, 'Company 5', 'CMP5', 'Contact 5', '0211000005', 'company5@demo.com', 0.00, 0.00);
 
 -- Customers
 INSERT INTO `customers` (`id`, `name`, `mobile`, `email`, `state`, `referral_code`, `referred_by`, `points_balance`) VALUES
