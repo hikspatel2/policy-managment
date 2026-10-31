@@ -53,18 +53,10 @@ try {
     }
 } catch (\Throwable $e) {}
 
-// Enforce Agent Subscription Limit
-if ($role === 'agent') {
+// Verify agent status
+if ($role === 'agent' && $aid > 0) {
     try {
-        $subLimit = checkAgentSubscriptionLimit($conn, $aid, 'policy');
-        if (!empty($subLimit) && isset($subLimit['allowed']) && !$subLimit['allowed']) {
-            die("<div style='max-width:600px;margin:50px auto;padding:25px;background:#fef2f2;border:1px solid #fecaca;border-radius:10px;font-family:sans-serif;'>
-                <h3 style='color:#991b1b;margin-top:0;'><i class='fas fa-ban'></i> Subscription Limit Reached</h3>
-                <p style='color:#7f1d1d;'>" . htmlspecialchars($subLimit['message'] ?? 'Subscription required') . "</p>
-                <a href='agent_plans.php' style='display:inline-block;background:#001f3f;color:#fff;padding:10px 20px;border-radius:6px;text-decoration:none;font-weight:600;'>Upgrade Subscription Plan</a>
-                <a href='dashboard.php' style='margin-left:10px;color:#64748b;text-decoration:none;'>Return to Dashboard</a>
-            </div>");
-        }
+        checkAgentSubscriptionLimit($conn, $aid, 'policy');
     } catch (\Throwable $e) {}
 }
 

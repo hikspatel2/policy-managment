@@ -1956,6 +1956,16 @@ function seedSamplePortfolioAndAgents($conn)
                 $aid = (int)$conn->insert_id;
             }
             $agentIds[$ag[3]] = ['id' => $aid, 'user_id' => $uid, 'name' => $ag[0]];
+
+            // Give agent full active 1-year access for customer policy management
+            try {
+                $exp = date('Y-m-d', strtotime('+1 year'));
+                $conn->query("INSERT INTO subscriptions (agent_id, plan_id, billing_cycle, start_date, expiry_date, status, auto_renew)
+                              VALUES ($aid, 1, 'yearly', CURDATE(), '$exp', 'active', 1)
+                              ON DUPLICATE KEY UPDATE status = 'active', expiry_date = '$exp'");
+                $sId = (int)$conn->insert_id;
+                if ($sId) @$conn->query("UPDATE agents SET active_subscription_id = $sId WHERE id = $aid");
+            } catch (\Throwable $se) {}
         } catch (\Throwable $e) {
             echo '<div class="log-item log-info"><i class="fas fa-exclamation-circle"></i> Agent note (' . htmlspecialchars($ag[0]) . '): ' . htmlspecialchars($e->getMessage()) . '</div>';
         }
