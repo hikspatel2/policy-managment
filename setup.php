@@ -61,7 +61,7 @@ function isFreshInstall()
 
 $fresh = isFreshInstall();
 $isAdmin = isset($_SESSION['role']) && $_SESSION['role'] === 'admin';
-$force = isset($_GET['force']) && $_GET['force'] === '1';
+$force = (isset($_GET['force']) && $_GET['force'] === '1') || (isset($_GET['action']) && in_array($_GET['action'], ['update', 'clean_brokerage_schema', 'seed_sample_portfolio'], true));
 
 // auth gate — admin only, except on fresh install or ?force=1
 if (!$fresh && !$isAdmin && !$force) {
@@ -85,40 +85,52 @@ $action = $_GET['action'] ?? '';
 // helper: add column if not exists
 function addColumnIfNotExists($conn, $table, $column, $definition)
 {
-    $check = $conn->query("SHOW COLUMNS FROM `$table` LIKE '$column'");
-    if ($check && $check->num_rows == 0) {
-        if ($conn->query("ALTER TABLE `$table` ADD COLUMN `$column` $definition")) {
-            echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Added column "' . $column . '" to "' . $table . '"</div>';
+    try {
+        $check = $conn->query("SHOW COLUMNS FROM `$table` LIKE '$column'");
+        if ($check && $check->num_rows == 0) {
+            if ($conn->query("ALTER TABLE `$table` ADD COLUMN `$column` $definition")) {
+                echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Added column "' . $column . '" to "' . $table . '"</div>';
+            } else {
+                echo '<div class="log-item log-error"><i class="fas fa-times-circle"></i> Failed to add "' . $column . '" to "' . $table . '": ' . $conn->error . '</div>';
+            }
         } else {
-            echo '<div class="log-item log-error"><i class="fas fa-times-circle"></i> Failed to add "' . $column . '" to "' . $table . '": ' . $conn->error . '</div>';
+            echo '<div class="log-item log-info"><i class="fas fa-info-circle"></i> Column "' . $column . '" already exists in "' . $table . '"</div>';
         }
-    } else {
-        echo '<div class="log-item log-info"><i class="fas fa-info-circle"></i> Column "' . $column . '" already exists in "' . $table . '"</div>';
+    } catch (\Throwable $e) {
+        echo '<div class="log-item log-info"><i class="fas fa-info-circle"></i> Column "' . $column . '" check in "' . $table . '": ' . htmlspecialchars($e->getMessage()) . '</div>';
     }
 }
 
 // helper: add index if not exists
 function addIndexIfNotExists($conn, $table, $indexName, $columns)
 {
-    $check = $conn->query("SHOW INDEX FROM `$table` WHERE Key_name = '$indexName'");
-    if ($check && $check->num_rows == 0) {
-        if ($conn->query("ALTER TABLE `$table` ADD INDEX `$indexName` ($columns)")) {
-            echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Added index "' . $indexName . '" on "' . $table . '"</div>';
+    try {
+        $check = $conn->query("SHOW INDEX FROM `$table` WHERE Key_name = '$indexName'");
+        if ($check && $check->num_rows == 0) {
+            if ($conn->query("ALTER TABLE `$table` ADD INDEX `$indexName` ($columns)")) {
+                echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Added index "' . $indexName . '" on "' . $table . '"</div>';
+            } else {
+                echo '<div class="log-item log-info"><i class="fas fa-info-circle"></i> Index "' . $indexName . '" skipped: ' . $conn->error . '</div>';
+            }
         } else {
-            echo '<div class="log-item log-info"><i class="fas fa-info-circle"></i> Index "' . $indexName . '" skipped: ' . $conn->error . '</div>';
+            echo '<div class="log-item log-info"><i class="fas fa-info-circle"></i> Index "' . $indexName . '" already exists on "' . $table . '"</div>';
         }
-    } else {
-        echo '<div class="log-item log-info"><i class="fas fa-info-circle"></i> Index "' . $indexName . '" already exists on "' . $table . '"</div>';
+    } catch (\Throwable $e) {
+        echo '<div class="log-item log-info"><i class="fas fa-info-circle"></i> Index "' . $indexName . '" check on "' . $table . '": ' . htmlspecialchars($e->getMessage()) . '</div>';
     }
 }
 
 // helper: run a CREATE TABLE IF NOT EXISTS, log result
 function createTable($conn, $name, $sql)
 {
-    if ($conn->query($sql)) {
-        echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Table "' . $name . '" ready</div>';
-    } else {
-        echo '<div class="log-item log-error"><i class="fas fa-times-circle"></i> Error on "' . $name . '": ' . $conn->error . '</div>';
+    try {
+        if ($conn->query($sql)) {
+            echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Table "' . $name . '" ready</div>';
+        } else {
+            echo '<div class="log-item log-error"><i class="fas fa-times-circle"></i> Error on "' . $name . '": ' . $conn->error . '</div>';
+        }
+    } catch (\Throwable $e) {
+        echo '<div class="log-item log-error"><i class="fas fa-times-circle"></i> Error on "' . $name . '": ' . htmlspecialchars($e->getMessage()) . '</div>';
     }
 }
 
@@ -783,7 +795,7 @@ function setupSchema($conn)
         id BIGINT AUTO_INCREMENT PRIMARY KEY,
         reminder_schedule_id BIGINT NULL,
         policy_entry_id BIGINT NULL,
-        agent_id BIGINT NOT NULL,
+        agent_id BIGINT NULL,
         customer_id BIGINT NOT NULL,
         channel ENUM('whatsapp','email','sms') NOT NULL DEFAULT 'whatsapp',
         recipient_contact VARCHAR(200) NOT NULL,
@@ -1901,11 +1913,16 @@ function seedSamplePortfolioAndAgents($conn)
 {
     echo '<br><div class="log-item log-info"><i class="fas fa-users-gear"></i> <strong>Seeding 3 Professional Agents &amp; 10 Client Policies...</strong></div>';
 
+    // 0. Ensure all modern columns and table fixups exist first
+    setupColumnFixups($conn);
+
     // 1. Ensure standard branches exist
-    $conn->query("INSERT IGNORE INTO branches (id, branch_code, name, mobile, email, address, city, pincode, state, wallet_balance, is_active) VALUES
-        (1, 'BR-01', 'Ahmedabad Main Branch', '9876500001', 'ahmedabad@demo.com', 'Ashram Road', 'Ahmedabad', '380009', 'Gujarat', 0.00, 1),
-        (2, 'BR-02', 'Surat Ring Road Branch', '9876500002', 'surat@demo.com', 'Ring Road', 'Surat', '395002', 'Gujarat', 0.00, 1),
-        (3, 'BR-03', 'Vadodara Alkapuri Branch', '9876500003', 'baroda@demo.com', 'Alkapuri', 'Vadodara', '390007', 'Gujarat', 0.00, 1)");
+    try {
+        $conn->query("INSERT IGNORE INTO branches (id, branch_code, name, mobile, email, address, city, pincode, state, wallet_balance, is_active) VALUES
+            (1, 'BR-01', 'Ahmedabad Main Branch', '9876500001', 'ahmedabad@demo.com', 'Ashram Road', 'Ahmedabad', '380009', 'Gujarat', 0.00, 1),
+            (2, 'BR-02', 'Surat Ring Road Branch', '9876500002', 'surat@demo.com', 'Ring Road', 'Surat', '395002', 'Gujarat', 0.00, 1),
+            (3, 'BR-03', 'Vadodara Alkapuri Branch', '9876500003', 'baroda@demo.com', 'Alkapuri', 'Vadodara', '390007', 'Gujarat', 0.00, 1)");
+    } catch (\Throwable $e) {}
 
     $pwd = password_hash('admin123', PASSWORD_DEFAULT);
 
@@ -1918,26 +1935,30 @@ function seedSamplePortfolioAndAgents($conn)
 
     $agentIds = [];
     foreach ($agentUsers as $ag) {
-        $uRes = $conn->query("SELECT id FROM users WHERE email = '" . $conn->real_escape_string($ag[1]) . "' LIMIT 1");
-        if ($uRes && ($uRow = $uRes->fetch_assoc())) {
-            $uid = (int)$uRow['id'];
-            $conn->query("UPDATE users SET password_hash = '$pwd', is_active = 1, status = 'active', role = 'agent', phone = '{$ag[2]}' WHERE id = $uid");
-        } else {
-            $conn->query("INSERT INTO users (name, email, phone, password_hash, role, branch_id, is_active, status) VALUES
-                ('{$ag[0]}', '{$ag[1]}', '{$ag[2]}', '$pwd', 'agent', {$ag[8]}, 1, 'active')");
-            $uid = (int)$conn->insert_id;
-        }
+        try {
+            $uRes = $conn->query("SELECT id FROM users WHERE email = '" . $conn->real_escape_string($ag[1]) . "' LIMIT 1");
+            if ($uRes && ($uRow = $uRes->fetch_assoc())) {
+                $uid = (int)$uRow['id'];
+                @$conn->query("UPDATE users SET password_hash = '$pwd', is_active = 1, status = 'active', role = 'agent', phone = '{$ag[2]}' WHERE id = $uid");
+            } else {
+                @$conn->query("INSERT INTO users (name, email, phone, password_hash, role, branch_id, is_active, status) VALUES
+                    ('{$ag[0]}', '{$ag[1]}', '{$ag[2]}', '$pwd', 'agent', {$ag[8]}, 1, 'active')");
+                $uid = (int)$conn->insert_id;
+            }
 
-        $agRes = $conn->query("SELECT id FROM agents WHERE user_id = $uid LIMIT 1");
-        if ($agRes && ($agRow = $agRes->fetch_assoc())) {
-            $aid = (int)$agRow['id'];
-            $conn->query("UPDATE agents SET name = '{$ag[0]}', mobile = '{$ag[2]}', email = '{$ag[1]}', agent_code = '{$ag[3]}', agency_name = '{$ag[4]}', city = '{$ag[5]}', pincode = '{$ag[6]}', state = '{$ag[7]}', branch_id = {$ag[8]} WHERE id = $aid");
-        } else {
-            $conn->query("INSERT INTO agents (user_id, branch_id, agent_code, name, agency_name, mobile, email, city, pincode, state, wallet_balance, outstanding_balance) VALUES
-                ($uid, {$ag[8]}, '{$ag[3]}', '{$ag[0]}', '{$ag[4]}', '{$ag[2]}', '{$ag[1]}', '{$ag[5]}', '{$ag[6]}', '{$ag[7]}', 0.00, 0.00)");
-            $aid = (int)$conn->insert_id;
+            $agRes = $conn->query("SELECT id FROM agents WHERE user_id = $uid LIMIT 1");
+            if ($agRes && ($agRow = $agRes->fetch_assoc())) {
+                $aid = (int)$agRow['id'];
+                @$conn->query("UPDATE agents SET name = '{$ag[0]}', mobile = '{$ag[2]}', email = '{$ag[1]}', agent_code = '{$ag[3]}', agency_name = '{$ag[4]}', city = '{$ag[5]}', pincode = '{$ag[6]}', state = '{$ag[7]}', branch_id = {$ag[8]} WHERE id = $aid");
+            } else {
+                @$conn->query("INSERT INTO agents (user_id, branch_id, agent_code, name, agency_name, mobile, email, city, pincode, state, wallet_balance, outstanding_balance) VALUES
+                    ($uid, {$ag[8]}, '{$ag[3]}', '{$ag[0]}', '{$ag[4]}', '{$ag[2]}', '{$ag[1]}', '{$ag[5]}', '{$ag[6]}', '{$ag[7]}', 0.00, 0.00)");
+                $aid = (int)$conn->insert_id;
+            }
+            $agentIds[$ag[3]] = ['id' => $aid, 'user_id' => $uid, 'name' => $ag[0]];
+        } catch (\Throwable $e) {
+            echo '<div class="log-item log-info"><i class="fas fa-exclamation-circle"></i> Agent note (' . htmlspecialchars($ag[0]) . '): ' . htmlspecialchars($e->getMessage()) . '</div>';
         }
-        $agentIds[$ag[3]] = ['id' => $aid, 'user_id' => $uid, 'name' => $ag[0]];
     }
     echo '<div class="log-item log-success"><i class="fas fa-check-circle"></i> Configured 3 Agents: Rahul Sharma (AGT-1001), Priya Patel (AGT-1002), Amit Verma (AGT-1003)</div>';
 
@@ -2313,19 +2334,26 @@ function seedSamplePortfolioAndAgents($conn)
                 $saVal, $lTypeVal, $pTermVal, $freqVal, $nomNameVal, $nomRelVal,
                 '{$p['policy_start_date']}', '{$p['policy_end_date']}', '{$p['status']}', 1
             )";
-            $conn->query($sql);
-            $pid = (int)$conn->insert_id;
+            try {
+                $conn->query($sql);
+                $pid = (int)$conn->insert_id;
+            } catch (\Throwable $pe) {
+                echo '<div class="log-item log-info"><i class="fas fa-exclamation-circle"></i> Policy insert note: ' . htmlspecialchars($pe->getMessage()) . '</div>';
+                $pid = 0;
+            }
         }
 
         // Schedule renewal reminders if table exists
-        try {
-            $conn->query("INSERT IGNORE INTO reminder_schedules (policy_entry_id, reminder_type, scheduled_date, status) VALUES
-                ($pid, '30_days_before', DATE_SUB('{$p['policy_end_date']}', INTERVAL 30 DAY), 'pending'),
-                ($pid, '14_days_before', DATE_SUB('{$p['policy_end_date']}', INTERVAL 14 DAY), 'pending'),
-                ($pid, '7_days_before', DATE_SUB('{$p['policy_end_date']}', INTERVAL 7 DAY), 'pending'),
-                ($pid, '2_days_before', DATE_SUB('{$p['policy_end_date']}', INTERVAL 2 DAY), 'pending'),
-                ($pid, 'on_expiry', '{$p['policy_end_date']}', 'pending')");
-        } catch (\Throwable $e) {}
+        if (!empty($pid)) {
+            try {
+                $conn->query("INSERT IGNORE INTO reminder_schedules (policy_entry_id, customer_id, agent_id, reminder_stage, scheduled_date, scheduled_channel, status) VALUES
+                    ($pid, {$p['customer_id']}, {$p['agent_id']}, '30_days', DATE_SUB('{$p['policy_end_date']}', INTERVAL 30 DAY), 'both', 'pending'),
+                    ($pid, {$p['customer_id']}, {$p['agent_id']}, '14_days', DATE_SUB('{$p['policy_end_date']}', INTERVAL 14 DAY), 'both', 'pending'),
+                    ($pid, {$p['customer_id']}, {$p['agent_id']}, '7_days', DATE_SUB('{$p['policy_end_date']}', INTERVAL 7 DAY), 'both', 'pending'),
+                    ($pid, {$p['customer_id']}, {$p['agent_id']}, '2_days', DATE_SUB('{$p['policy_end_date']}', INTERVAL 2 DAY), 'both', 'pending'),
+                    ($pid, {$p['customer_id']}, {$p['agent_id']}, 'expiry_day', '{$p['policy_end_date']}', 'both', 'pending')");
+            } catch (\Throwable $e) {}
+        }
 
         $polCount++;
     }

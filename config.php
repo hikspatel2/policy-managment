@@ -46,6 +46,72 @@ header("X-XSS-Protection: 1; mode=block");
 header("Referrer-Policy: strict-origin-when-cross-origin");
 header("Permissions-Policy: geolocation=(), microphone=(), camera=()");
 
+// Self-healing schema check to ensure all columns exist across any environment
+function ensurePolicySchemaIntegrity($conn) {
+    static $checked = false;
+    if ($checked) return;
+    $checked = true;
+
+    try {
+        $requiredCols = [
+            'policy_entries' => [
+                'insurance_category' => "VARCHAR(30) NOT NULL DEFAULT 'motor'",
+                'sum_insured' => "DECIMAL(14,2) NULL",
+                'plan_name' => "VARCHAR(150) NULL",
+                'tpa_name' => "VARCHAR(150) NULL",
+                'health_policy_type' => "VARCHAR(50) NULL",
+                'members_count' => "TINYINT UNSIGNED NULL DEFAULT 1",
+                'members_details' => "TEXT NULL",
+                'ped_details' => "TEXT NULL",
+                'sum_assured' => "DECIMAL(14,2) NULL",
+                'life_plan_type' => "VARCHAR(50) NULL",
+                'policy_term' => "SMALLINT NULL",
+                'premium_paying_term' => "SMALLINT NULL",
+                'payment_frequency' => "VARCHAR(50) NULL",
+                'nominee_name' => "VARCHAR(150) NULL",
+                'nominee_relation' => "VARCHAR(50) NULL",
+                'nominee_dob' => "DATE NULL",
+                'renewal_status' => "VARCHAR(50) NOT NULL DEFAULT 'original'",
+                'document_reference' => "VARCHAR(100) NULL",
+                'verification_status' => "VARCHAR(50) NOT NULL DEFAULT 'verified'",
+                'verified_by' => "BIGINT NULL",
+                'verified_at' => "DATETIME NULL",
+                'deleted_at' => "DATETIME NULL",
+                'deleted_by' => "BIGINT NULL",
+                'cancelled_at' => "DATETIME NULL",
+                'cancellation_reason' => "VARCHAR(255) NULL"
+            ],
+            'agents' => [
+                'agency_name' => "VARCHAR(200) NULL",
+                'city' => "VARCHAR(100) NULL",
+                'pincode' => "VARCHAR(10) NULL"
+            ],
+            'customers' => [
+                'agent_id' => "BIGINT NULL",
+                'family_head_id' => "BIGINT NULL",
+                'family_relation' => "VARCHAR(50) NULL DEFAULT 'Self'",
+                'city' => "VARCHAR(100) NULL",
+                'pincode' => "VARCHAR(10) NULL"
+            ],
+            'users' => [
+                'status' => "VARCHAR(50) NOT NULL DEFAULT 'active'",
+                'profile_setup_completed' => "TINYINT(1) NOT NULL DEFAULT 0"
+            ]
+        ];
+
+        foreach ($requiredCols as $tbl => $cols) {
+            foreach ($cols as $col => $def) {
+                try {
+                    $chk = $conn->query("SHOW COLUMNS FROM `$tbl` LIKE '$col'");
+                    if ($chk && $chk->num_rows === 0) {
+                        @$conn->query("ALTER TABLE `$tbl` ADD COLUMN `$col` $def");
+                    }
+                } catch (\Throwable $e) {}
+            }
+        }
+    } catch (\Throwable $e) {}
+}
+
 // Create database connection
 function getDBConnection() {
     try {
@@ -67,6 +133,7 @@ function getDBConnection() {
         }
 
         $conn->set_charset("utf8mb4");
+        ensurePolicySchemaIntegrity($conn);
         return $conn;
     } catch (Throwable $e) {
         error_log("Database error: " . $e->getMessage());
@@ -1274,36 +1341,58 @@ function activateAgentSubscription($conn, $agentId, $planId, $billingCycle = 'mo
 
 // 5-Stage Policy Expiry Reminders Scheduler
 function schedulePolicyReminders($conn, $policyId, $agentId, $customerId, $expiryDate) {
-    $pid = (int)$policyId;
-    $aid = (int)$agentId;
-    $cid = (int)$customerId;
-    if ($pid <= 0 || empty($expiryDate)) return false;
+    try {
+        $pid = (int)$policyId;
+        $aid = (int)$agentId;
+        $cid = (int)$customerId;
+        if ($pid <= 0 || empty($expiryDate)) return false;
 
-    // Check if reminders already exist for this policy; cancel any pending old reminders
-    $conn->query("UPDATE reminder_schedules SET status = 'cancelled' WHERE policy_entry_id = $pid AND status = 'pending'");
+        // Check if reminders already exist for this policy; cancel any pending old reminders
+        try {
+            $conn->query("UPDATE reminder_schedules SET status = 'cancelled' WHERE policy_entry_id = $pid AND status = 'pending'");
+        } catch (\Throwable $e) {}
 
-    $stages = [
-        '30_days'    => '-30 days',
-        '14_days'    => '-14 days',
-        '7_days'     => '-7 days',
-        '2_days'     => '-2 days',
-        'expiry_day' => '0 days'
-    ];
+        $stages = [
+            '30_days'    => '-30 days',
+            '14_days'    => '-14 days',
+            '7_days'     => '-7 days',
+            '2_days'     => '-2 days',
+            'expiry_day' => '0 days'
+        ];
 
-    $expTs = strtotime($expiryDate);
-    $today = date('Y-m-d');
-    $stmt = $conn->prepare("INSERT INTO reminder_schedules (policy_entry_id, agent_id, customer_id, reminder_stage, scheduled_date, scheduled_channel, status) VALUES (?, ?, ?, ?, ?, 'both', 'pending')");
+        $expTs = strtotime($expiryDate);
+        $today = date('Y-m-d');
 
-    foreach ($stages as $stage => $offset) {
-        $schedDate = date('Y-m-d', strtotime($offset, $expTs));
-        // Only schedule if date is today or in future
-        if ($schedDate >= $today) {
-            $stmt->bind_param('iiiss', $pid, $aid, $cid, $stage, $schedDate);
-            $stmt->execute();
+        if ($aid <= 0) {
+            $stmt = $conn->prepare("INSERT INTO reminder_schedules (policy_entry_id, agent_id, customer_id, reminder_stage, scheduled_date, scheduled_channel, status) VALUES (?, NULL, ?, ?, ?, 'both', 'pending')");
+            if ($stmt) {
+                foreach ($stages as $stage => $offset) {
+                    $schedDate = date('Y-m-d', strtotime($offset, $expTs));
+                    if ($schedDate >= $today) {
+                        $stmt->bind_param('iiss', $pid, $cid, $stage, $schedDate);
+                        $stmt->execute();
+                    }
+                }
+                $stmt->close();
+            }
+        } else {
+            $stmt = $conn->prepare("INSERT INTO reminder_schedules (policy_entry_id, agent_id, customer_id, reminder_stage, scheduled_date, scheduled_channel, status) VALUES (?, ?, ?, ?, ?, 'both', 'pending')");
+            if ($stmt) {
+                foreach ($stages as $stage => $offset) {
+                    $schedDate = date('Y-m-d', strtotime($offset, $expTs));
+                    if ($schedDate >= $today) {
+                        $stmt->bind_param('iiiss', $pid, $aid, $cid, $stage, $schedDate);
+                        $stmt->execute();
+                    }
+                }
+                $stmt->close();
+            }
         }
+        return true;
+    } catch (\Throwable $e) {
+        error_log("schedulePolicyReminders error: " . $e->getMessage());
+        return false;
     }
-    $stmt->close();
-    return true;
 }
 
 // WhatsApp Cloud API Sender
